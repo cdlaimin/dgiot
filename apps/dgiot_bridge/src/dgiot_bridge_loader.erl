@@ -17,6 +17,7 @@
 -module(dgiot_bridge_loader).
 -author("kenneth").
 -include_lib("dgiot/include/logger.hrl").
+-include("dgiot_bridge.hrl").
 -behaviour(gen_server).
 
 
@@ -29,13 +30,13 @@
 -record(state, {success}).
 
 start(Name, Filter, Fun) ->
-    ?LOG(info,"Name ~p , Filter ~p , Fun ~p",[Name, Filter, Fun]),
+%%    ?LOG(info, "Name ~p , Filter ~p , Fun ~p", [Name, Filter, Fun]),
     case whereis(Name) of
         undefined ->
             ChildSpec = {Name, {?MODULE, start_link, [Name, Filter, Fun]}, permanent, 5000, worker, [?MODULE]},
             supervisor:start_child(dgiot_bridge_sup, ChildSpec);
         Pid ->
-            ?LOG(info,"Filter ~p",[Filter]),
+            ?LOG(info, "Filter ~p", [Filter]),
             case gen_server:call(Pid, {load, Filter, Fun}, 5000) of
                 ok ->
                     {ok, Pid};
@@ -68,7 +69,7 @@ handle_cast(_Request, State) ->
 
 
 handle_info({load, Time, Module, Channels}, State) when Time > 5 ->
-    ?LOG(error,"Load Err ~p, Mod:~p", [Module, Channels]),
+    ?LOG(error, "Load Err ~p, Mod:~p", [Module, Channels]),
     {stop, normal, State};
 handle_info({load, Time, Module, Channels}, #state{success = Success} = State) ->
     case load_channel(Channels, fun(Channel) -> Success(Module, Channel) end) of
@@ -78,7 +79,7 @@ handle_info({load, Time, Module, Channels}, #state{success = Success} = State) -
             erlang:send_after(5000 * (Time + 1), self(), {load, Time + 1, Module, ErrChannels}),
             {noreply, State};
         {error, Reason} ->
-            ?LOG(error,"~p load Err, ~p", [Channels, Reason]),
+            ?LOG(error, "~p load Err, ~p", [Channels, Reason]),
             erlang:send_after(5000 * (Time + 1), self(), {load, Time + 1, Module, Channels}),
             {noreply, State}
     end;
@@ -104,10 +105,10 @@ load_channel(Channels, Fun) ->
             <<"method">> => <<"GET">>,
             <<"path">> => <<"/classes/Product">>,
             <<"body">> => #{
-                <<"keys">>=>[<<"objectId">>, <<"productSecret">>,<<"decoder">>],
+                <<"keys">> => [<<"decoder">>, <<"ACL">>, <<"name">>, <<"channel">>, <<"dynamicReg">>, <<"devType">>, <<"nodeType">>, <<"productSecret">>, <<"config">>, <<"topics">>],
                 <<"include">> => [<<"Dict">>],
                 <<"where">> => #{
-                    <<"$relatedTo">> =>#{
+                    <<"$relatedTo">> => #{
                         <<"key">> => <<"product">>,
                         <<"object">> => #{
                             <<"__type">> => <<"Pointer">>,
@@ -118,7 +119,7 @@ load_channel(Channels, Fun) ->
                 }
             }
         } || #{<<"objectId">> := ChannelId} <- Channels],
-    case dgiot_parse:batch(Request) of
+    case dgiot_parsex:batch(Request) of
         {ok, Results} ->
             format_channel(Channels, Results, Fun, []);
         {error, Reason} ->
@@ -127,13 +128,14 @@ load_channel(Channels, Fun) ->
 
 format_channel([], [], _, Err) -> {ok, Err};
 format_channel([Info | Channels], [#{<<"success">> := #{<<"results">> := Products}} | Results], Fun, Err) ->
-    Keys = [<<"decoder">>,<<"ACL">>, <<"dynamicReg">>, <<"nodeType">>, <<"productSecret">>, <<"config">>,<<"thing">>, <<"topics">>],
+    Keys = [<<"decoder">>, <<"ACL">>, <<"channel">>, <<"dynamicReg">>, <<"devType">>, <<"nodeType">>, <<"productSecret">>, <<"config">>, <<"thing">>, <<"topics">>],
     NewProducts = [{ProductId, maps:with(Keys, Product)} || #{<<"objectId">> := ProductId} = Product <- Products],
     Channel = Info#{<<"product">> => NewProducts},
     Fun(Channel),
+%%    update_products(NewProducts, Channel),
     format_channel(Channels, Results, Fun, Err);
 format_channel([Channel | Channels], [#{<<"error">> := Reason} | Results], Fun, Err) ->
-    ?LOG(error,"~p load error, ~p", [Channel, Reason]),
+    ?LOG(error, "~p load error, ~p", [Channel, Reason]),
     format_channel(Channels, Results, Fun, [Channel | Err]).
 
 start_load_channel(_, _, _, []) -> ok;
@@ -143,15 +145,20 @@ start_load_channel(Pid, PageSize, MaxTotal, [Filter | Filters]) ->
 
 
 start_load_channel(Pid, PageSize, MaxTotal, #{<<"mod">> := Module, <<"where">> := Where}) ->
-    Keys = [<<"type">>, <<"cType">>, <<"config">>],
+    Keys = [<<"type">>, <<"cType">>, <<"name">>, <<"config">>],
     Query = #{
+        <<"limit">> => PageSize * MaxTotal,
         <<"keys">> => Keys,
         <<"where">> => Where
     },
-    dgiot_parse_loader:start(<<"Channel">>, Query, PageSize, MaxTotal,
-        fun(Channels) ->
-            Pid ! {load, 0, Module, Channels}
-        end);
+    case dgiot_parsex:query_object(<<"Channel">>, Query) of
+        {ok, #{<<"results">> := Channels}} ->
+            [dgiot_data:insert(?DGIOT_BRIDGE, {ChannelId, type}, {dgiot_utils:to_int(Type), CType}) || #{<<"type">> := Type, <<"cType">> := CType, <<"objectId">> := ChannelId} <- Channels],
+            Pid ! {load, 0, Module, Channels};
+        _ ->
+            pass
+    end;
+
 start_load_channel(Pid, PageSize, MaxTotal, #{<<"where">> := Where}) ->
     start_load_channel(Pid, PageSize, MaxTotal, #{
         <<"mod">> => <<"dgiot_bridge_frame">>,
@@ -176,3 +183,30 @@ start_load_channel(Pid, PageSize, MaxTotal, #{<<"where">> := Where}) ->
 %%        {ok, Data} ->
 %%            io:
 %%    end.
+
+%%update_products([], _Channel) ->
+%%    pass;
+%%update_products([Product | Products], #{<<"objectId">> := ChannleId, <<"name">> := Name, <<"cType">> := _CType} = Channel) ->
+%%    update_product(Product, ChannleId, Name, _CType),
+%%    io:format("~s ~p ~p ~n", [?FILE, ?LINE, ChannleId]),
+%%    update_products(Products,  Channel);
+%%update_products(_,  _Channel) ->
+%%   pass.
+%%
+%%update_product(Product, ChannleId, Name, <<"INSTRUCT">>) ->
+%%    update_product_(Product, ChannleId, Name, <<"task_channel">>);
+%%
+%%update_product(Product, ChannleId, Name, <<"TD">>) ->
+%%    update_product_(Product, ChannleId, Name, <<"td_channel">>);
+%%
+%%update_product(Product, ChannleId, Name, _CType) ->
+%%    update_product_(Product, ChannleId, Name, <<"other_channel">>).
+%%
+%%update_product_({ProductId, #{<<"channel">> := Channel}}, ChannleId, Name, Type) ->
+%%    dgiot_parsex:update_object(<<"Product">>, ProductId, #{<<"channel">> => Channel#{Type => #{<<"id">> => ChannleId, <<"name">> => Name}}});
+%%update_product_({ProductId, _}, ChannleId, Name, Type) ->
+%%    dgiot_parsex:update_object(<<"Product">>, ProductId, #{<<"channel">> => #{Type => #{<<"id">> => ChannleId, <<"name">> => Name}}});
+%%update_product_(_, _ChannleId, _Name, _Type) ->
+%%    pass.
+
+

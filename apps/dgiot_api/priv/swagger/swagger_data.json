@@ -1,18 +1,5 @@
 {
-  "tags": [
-    {
-      "name": "Data",
-      "description": "数据管理"
-    },
-    {
-      "name": "_Role",
-      "description": "角色管理"
-    },
-    {
-      "name": "Product",
-      "description": "产品管理"
-    }
-  ],
+  "tags": [],
   "definitions": {
     "Token": {
       "type": "object",
@@ -31,62 +18,6 @@
     }
   },
   "paths": {
-    "/tree": {
-      "post": {
-        "summary": "获取类树",
-        "description": "获取类树",
-        "parameters": [
-          {
-            "in": "body",
-            "name": "data",
-            "description": "获取类树",
-            "required": true,
-            "schema": {
-              "type": "object",
-              "properties": {
-                "class": {
-                  "required": true,
-                  "description": "类表名",
-                  "type": "string",
-                  "example": "Device"
-                },
-                "parent": {
-                  "required": true,
-                  "description": "父字段名",
-                  "type": "string",
-                  "example": "parentId"
-                },
-                "filter": {
-                  "description": "过滤条件 {\"keys\":[\"parentId\",\"name\"],\"where\":{\"$or\":[{\"parentId\":\"lgtDJDEZlW\"},{\"objectId\":\"lgtDJDEZlW\"}]}}",
-                  "type": "object",
-                  "example": "{\"keys\":[\"parentId\",\"name\"]}"
-                }
-              }
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Returns operation status"
-          },
-          "400": {
-            "description": "Bad Request"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden"
-          },
-          "500": {
-            "description": "Server Internal error"
-          }
-        },
-        "tags": [
-          "Data"
-        ]
-      }
-    },
     "/menu": {
       "post": {
         "summary": "菜单导入",
@@ -167,45 +98,6 @@
         },
         "tags": [
           "Menu"
-        ]
-      }
-    },
-    "/graphql": {
-      "post": {
-        "security": [],
-        "summary": "graphql",
-        "description": "graphql",
-        "parameters": [
-          {
-            "in": "body",
-            "name": "graphql",
-            "required": true,
-            "schema": {
-              "type": "object",
-              "properties": {
-              }
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Returns operation status"
-          },
-          "400": {
-            "description": "Bad Request"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden"
-          },
-          "500": {
-            "description": "Server Internal error"
-          }
-        },
-        "tags": [
-          "Data"
         ]
       }
     },
@@ -294,6 +186,55 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Server Internal error"
+          }
+        },
+        "tags": [
+          "Data"
+        ]
+      }
+    },
+    "/import_wmxdata": {
+      "post": {
+        "summary": "导入物模型",
+        "description": "导入物模型",
+        "consumes": [
+          "multipart/form-data"
+        ],
+        "parameters": [
+          {
+            "name": "objectId",
+            "in": "formData",
+            "description": "产品id",
+            "type": "string"
+          },
+          {
+            "name": "type",
+            "in": "formData",
+            "description": "dlink",
+            "type": "string"
+          },
+          {
+            "name": "file",
+            "in": "formData",
+            "description": "数据文件",
+            "type": "file"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns operation status"
           },
           "400": {
             "description": "Bad Request"
@@ -413,6 +354,46 @@
       }
     },
     "/thing": {
+      "get": {
+        "summary": "查询物模型",
+        "description": "查询物模型",
+        "parameters": [
+          {
+            "name": "productid",
+            "in": "query",
+            "type": "string",
+            "default": "8ecadfebe1",
+            "description": "产品id"
+          },
+          {
+            "name": "moduleType",
+            "in": "query",
+            "type": "string",
+            "default": "properties",
+            "description": "属性类型"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns success"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Server Internal error"
+          }
+        },
+        "tags": [
+          "Product"
+        ]
+      },
       "post": {
         "summary": "添加物模型",
         "description": "添加物模型",
@@ -431,45 +412,176 @@
                   "example": "ed09e37bbb"
                 },
                 "item": {
-                  "description": "物模型单项指标",
-                  "type": "object",
-                  "example": {
-                    "name": "电压",
-                    "index": 11,
-                    "isshow": true,
-                    "dataForm": {
-                      "data": "1",
-                      "rate": 1,
-                      "order": 26,
-                      "round": "all",
-                      "offset": 0,
-                      "address": "0X0107",
-                      "control": "%d",
-                      "iscount": "0",
-                      "slaveid": "0X01",
-                      "protocol": "modbus",
-                      "strategy": "20",
-                      "collection": "%s*0.1",
-                      "countround": "all",
-                      "operatetype": "readHregs",
-                      "originaltype": "short16_AB",
-                      "countstrategy": 20,
-                      "countcollection": "%s"
-                    },
-                    "dataType": {
-                      "type": "float",
-                      "specs": {
-                        "max": 9999,
-                        "min": 0,
-                        "step": 0,
-                        "unit": "V",
-                        "precision": 2
+                  "schema": {
+                    "description": "物模型单项指标",
+                    "properties": {
+                      "name": {
+                        "description": "物模型功能名称",
+                        "type": "string",
+                        "example": "电压"
+                      },
+                      "identifier": {
+                        "description": "物模型标识符",
+                        "type": "string",
+                        "example": "voltage"
+                      },
+                      "accessMode": {
+                        "description": "读写类型",
+                        "type": "string",
+                        "example": "r",
+                        "enum": [
+                          "r",
+                          "rw"
+                        ]
+                      },
+                      "devicetype": {
+                        "description": "物模型类型",
+                        "type": "string",
+                        "example": "控制器"
+                      },
+                      "index": {
+                        "description": "序号",
+                        "type": "number",
+                        "example": 1
+                      },
+                      "isshow": {
+                        "description": "是否显示",
+                        "type": "boolean",
+                        "example": true
+                      },
+                      "isstorage": {
+                        "description": "是否存储",
+                        "type": "boolean",
+                        "example": true
+                      },
+                      "moduleType": {
+                        "description": "类型",
+                        "type": "string",
+                        "example": "properties"
+                      },
+                      "dataForm": {
+                        "schema": {
+                          "description": "物模型数据采集指标",
+                          "properties": {
+                            "collection": {
+                              "description": "采集公式，%s为占位符，表示自身值",
+                              "type": "string",
+                              "example": "%s"
+                            },
+                            "control": {
+                              "description": "控制下发公式，%d为占位符，表示自身值",
+                              "type": "string",
+                              "example": "%d"
+                            },
+                            "protocol": {
+                              "description": "协议类型（动态获取）",
+                              "type": "string",
+                              "example": "MODBUSRTU"
+                            },
+                            "order": {
+                              "description": "采集顺序",
+                              "type": "number",
+                              "example": 0
+                            },
+                            "round": {
+                              "description": "采集轮次",
+                              "type": "string",
+                              "example": "all",
+                              "enum": [
+                                "all",
+                                "first",
+                                "last"
+                              ]
+                            },
+                            "strategy": {
+                              "description": "采集策略",
+                              "type": "string",
+                              "example": "采集值",
+                              "enum": [
+                                "采集值",
+                                "计算值",
+                                "主动上报"
+                              ]
+                            }
+                          }
+                        },
+                        "required": false,
+                        "type": "object"
+                      },
+                      "dataType": {
+                        "schema": {
+                          "description": "物模型数据存储",
+                          "properties": {
+                            "type": {
+                              "description": "类型",
+                              "type": "string",
+                              "example": "int",
+                              "enum": [
+                                "int",
+                                "long",
+                                "float",
+                                "double",
+                                "text",
+                                "boole",
+                                "date",
+                                "enum",
+                                "object"
+                              ]
+                            },
+                            "specs": {
+                              "schema": {
+                                "description": "数据存储",
+                                "properties": {
+                                  "min": {
+                                    "description": "取值范围(最小值)",
+                                    "type": "number",
+                                    "example": -99999
+                                  },
+                                  "max": {
+                                    "description": "取值范围(最大值)",
+                                    "type": "number",
+                                    "example": 99999
+                                  },
+                                  "precision": {
+                                    "description": "小数位数",
+                                    "type": "number",
+                                    "example": 3
+                                  },
+                                  "step": {
+                                    "description": "步长",
+                                    "type": "number",
+                                    "example": 3
+                                  },
+                                  "unit": {
+                                    "description": "单位",
+                                    "type": "string",
+                                    "example": "%"
+                                  }
+                                }
+                              },
+                              "required": false,
+                              "type": "object"
+                            }
+                          }
+                        },
+                        "required": false,
+                        "type": "object"
+                      },
+                      "dataSource": {
+                        "schema": {
+                          "description": "物模型协议数据（动态）",
+                          "properties": {
+                            "_dlinkindex": {
+                              "description": "报文序号",
+                              "type": "number",
+                              "example": 1
+                            }
+                          }
+                        }
                       }
                     },
                     "required": true,
-                    "accessMode": "r",
-                    "devicetype": "控制器",
-                    "identifier": "voltage"
+                    "type": "object"
                   }
                 }
               }
@@ -515,45 +627,176 @@
                   "example": "ed09e37bbb"
                 },
                 "item": {
-                  "description": "物模型单项指标",
-                  "type": "object",
-                  "example": {
-                    "name": "电压",
-                    "index": 11,
-                    "isshow": true,
-                    "dataForm": {
-                      "data": "1",
-                      "rate": 1,
-                      "order": 26,
-                      "round": "all",
-                      "offset": 0,
-                      "address": "0X0107",
-                      "control": "%d",
-                      "iscount": "0",
-                      "slaveid": "0X01",
-                      "protocol": "modbus",
-                      "strategy": "20",
-                      "collection": "%s*0.1",
-                      "countround": "all",
-                      "operatetype": "readHregs",
-                      "originaltype": "short16_AB",
-                      "countstrategy": 20,
-                      "countcollection": "%s"
-                    },
-                    "dataType": {
-                      "type": "float",
-                      "specs": {
-                        "max": 9999,
-                        "min": 0,
-                        "step": 0,
-                        "unit": "V",
-                        "precision": 2
+                  "schema": {
+                    "description": "物模型单项指标",
+                    "properties": {
+                      "name": {
+                        "description": "物模型功能名称",
+                        "type": "string",
+                        "example": "电压"
+                      },
+                      "identifier": {
+                        "description": "物模型标识符",
+                        "type": "string",
+                        "example": "voltage"
+                      },
+                      "accessMode": {
+                        "description": "读写类型",
+                        "type": "string",
+                        "example": "r",
+                        "enum": [
+                          "r",
+                          "rw"
+                        ]
+                      },
+                      "devicetype": {
+                        "description": "物模型类型",
+                        "type": "string",
+                        "example": "控制器"
+                      },
+                      "index": {
+                        "description": "序号",
+                        "type": "number",
+                        "example": 1
+                      },
+                      "isshow": {
+                        "description": "是否显示",
+                        "type": "boolean",
+                        "example": true
+                      },
+                      "isstorage": {
+                        "description": "是否存储",
+                        "type": "boolean",
+                        "example": true
+                      },
+                      "moduleType": {
+                        "description": "类型",
+                        "type": "string",
+                        "example": "properties"
+                      },
+                      "dataForm": {
+                        "schema": {
+                          "description": "物模型数据采集指标",
+                          "properties": {
+                            "collection": {
+                              "description": "采集公式，%s为占位符，表示自身值",
+                              "type": "string",
+                              "example": "%s"
+                            },
+                            "control": {
+                              "description": "控制下发公式，%d为占位符，表示自身值",
+                              "type": "string",
+                              "example": "%d"
+                            },
+                            "protocol": {
+                              "description": "协议类型（动态获取）",
+                              "type": "string",
+                              "example": "MODBUSRTU"
+                            },
+                            "order": {
+                              "description": "采集顺序",
+                              "type": "number",
+                              "example": 0
+                            },
+                            "round": {
+                              "description": "采集轮次",
+                              "type": "string",
+                              "example": "all",
+                              "enum": [
+                                "all",
+                                "first",
+                                "last"
+                              ]
+                            },
+                            "strategy": {
+                              "description": "采集策略",
+                              "type": "string",
+                              "example": "采集值",
+                              "enum": [
+                                "采集值",
+                                "计算值",
+                                "主动上报"
+                              ]
+                            }
+                          }
+                        },
+                        "required": false,
+                        "type": "object"
+                      },
+                      "dataType": {
+                        "schema": {
+                          "description": "物模型数据存储",
+                          "properties": {
+                            "type": {
+                              "description": "类型",
+                              "type": "string",
+                              "example": "int",
+                              "enum": [
+                                "int",
+                                "long",
+                                "float",
+                                "double",
+                                "text",
+                                "boole",
+                                "date",
+                                "enum",
+                                "object"
+                              ]
+                            },
+                            "specs": {
+                              "schema": {
+                                "description": "数据存储",
+                                "properties": {
+                                  "min": {
+                                    "description": "取值范围(最小值)",
+                                    "type": "number",
+                                    "example": -99999
+                                  },
+                                  "max": {
+                                    "description": "取值范围(最大值)",
+                                    "type": "number",
+                                    "example": 99999
+                                  },
+                                  "precision": {
+                                    "description": "小数位数",
+                                    "type": "number",
+                                    "example": 3
+                                  },
+                                  "step": {
+                                    "description": "步长",
+                                    "type": "number",
+                                    "example": 3
+                                  },
+                                  "unit": {
+                                    "description": "单位",
+                                    "type": "string",
+                                    "example": "%"
+                                  }
+                                }
+                              },
+                              "required": false,
+                              "type": "object"
+                            }
+                          }
+                        },
+                        "required": false,
+                        "type": "object"
+                      },
+                      "dataSource": {
+                        "schema": {
+                          "description": "物模型协议数据（动态）",
+                          "properties": {
+                            "_dlinkindex": {
+                              "description": "报文序号",
+                              "type": "number",
+                              "example": 1
+                            }
+                          }
+                        }
                       }
                     },
                     "required": true,
-                    "accessMode": "r",
-                    "devicetype": "控制器",
-                    "identifier": "voltage"
+                    "type": "object"
                   }
                 }
               }
@@ -594,50 +837,181 @@
               "type": "object",
               "properties": {
                 "productid": {
-                  "description": "产品标识",
+                  "description": "产品id",
                   "type": "string",
                   "example": "ed09e37bbb"
                 },
                 "item": {
-                  "description": "物模型单项指标",
-                  "type": "object",
-                  "example": {
-                    "name": "电压",
-                    "index": 11,
-                    "isshow": true,
-                    "dataForm": {
-                      "data": "1",
-                      "rate": 1,
-                      "order": 26,
-                      "round": "all",
-                      "offset": 0,
-                      "address": "0X0107",
-                      "control": "%d",
-                      "iscount": "0",
-                      "slaveid": "0X01",
-                      "protocol": "modbus",
-                      "strategy": "20",
-                      "collection": "%s*0.1",
-                      "countround": "all",
-                      "operatetype": "readHregs",
-                      "originaltype": "short16_AB",
-                      "countstrategy": 20,
-                      "countcollection": "%s"
-                    },
-                    "dataType": {
-                      "type": "float",
-                      "specs": {
-                        "max": 9999,
-                        "min": 0,
-                        "step": 0,
-                        "unit": "V",
-                        "precision": 2
+                  "schema": {
+                    "description": "物模型单项指标",
+                    "properties": {
+                      "name": {
+                        "description": "物模型功能名称",
+                        "type": "string",
+                        "example": "电压"
+                      },
+                      "identifier": {
+                        "description": "物模型标识符",
+                        "type": "string",
+                        "example": "voltage"
+                      },
+                      "accessMode": {
+                        "description": "读写类型",
+                        "type": "string",
+                        "example": "r",
+                        "enum": [
+                          "r",
+                          "rw"
+                        ]
+                      },
+                      "devicetype": {
+                        "description": "物模型类型",
+                        "type": "string",
+                        "example": "控制器"
+                      },
+                      "index": {
+                        "description": "序号",
+                        "type": "number",
+                        "example": 1
+                      },
+                      "isshow": {
+                        "description": "是否显示",
+                        "type": "boolean",
+                        "example": true
+                      },
+                      "isstorage": {
+                        "description": "是否存储",
+                        "type": "boolean",
+                        "example": true
+                      },
+                      "moduleType": {
+                        "description": "类型",
+                        "type": "string",
+                        "example": "properties"
+                      },
+                      "dataForm": {
+                        "schema": {
+                          "description": "物模型数据采集指标",
+                          "properties": {
+                            "collection": {
+                              "description": "采集公式，%s为占位符，表示自身值",
+                              "type": "string",
+                              "example": "%s"
+                            },
+                            "control": {
+                              "description": "控制下发公式，%d为占位符，表示自身值",
+                              "type": "string",
+                              "example": "%d"
+                            },
+                            "protocol": {
+                              "description": "协议类型（动态获取）",
+                              "type": "string",
+                              "example": "MODBUSRTU"
+                            },
+                            "order": {
+                              "description": "采集顺序",
+                              "type": "number",
+                              "example": 0
+                            },
+                            "round": {
+                              "description": "采集轮次",
+                              "type": "string",
+                              "example": "all",
+                              "enum": [
+                                "all",
+                                "first",
+                                "last"
+                              ]
+                            },
+                            "strategy": {
+                              "description": "采集策略",
+                              "type": "string",
+                              "example": "采集值",
+                              "enum": [
+                                "采集值",
+                                "计算值",
+                                "主动上报"
+                              ]
+                            }
+                          }
+                        },
+                        "required": false,
+                        "type": "object"
+                      },
+                      "dataType": {
+                        "schema": {
+                          "description": "物模型数据存储",
+                          "properties": {
+                            "type": {
+                              "description": "类型",
+                              "type": "string",
+                              "example": "int",
+                              "enum": [
+                                "int",
+                                "long",
+                                "float",
+                                "double",
+                                "text",
+                                "boole",
+                                "date",
+                                "enum",
+                                "object"
+                              ]
+                            },
+                            "specs": {
+                              "schema": {
+                                "description": "数据存储",
+                                "properties": {
+                                  "min": {
+                                    "description": "取值范围(最小值)",
+                                    "type": "number",
+                                    "example": -99999
+                                  },
+                                  "max": {
+                                    "description": "取值范围(最大值)",
+                                    "type": "number",
+                                    "example": 99999
+                                  },
+                                  "precision": {
+                                    "description": "小数位数",
+                                    "type": "number",
+                                    "example": 3
+                                  },
+                                  "step": {
+                                    "description": "步长",
+                                    "type": "number",
+                                    "example": 3
+                                  },
+                                  "unit": {
+                                    "description": "单位",
+                                    "type": "string",
+                                    "example": "%"
+                                  }
+                                }
+                              },
+                              "required": false,
+                              "type": "object"
+                            }
+                          }
+                        },
+                        "required": false,
+                        "type": "object"
+                      },
+                      "dataSource": {
+                        "schema": {
+                          "description": "物模型协议数据（动态）",
+                          "properties": {
+                            "_dlinkindex": {
+                              "description": "报文序号",
+                              "type": "number",
+                              "example": 1
+                            }
+                          }
+                        }
                       }
                     },
                     "required": true,
-                    "accessMode": "r",
-                    "devicetype": "控制器",
-                    "identifier": "voltage"
+                    "type": "object"
                   }
                 }
               }
@@ -962,6 +1336,61 @@
           "Data"
         ]
       },
+      "get": {
+        "summary": "查询关联",
+        "description": "查询关联",
+        "parameters": [
+          {
+            "name": "destClass",
+            "in": "query",
+            "type": "string",
+            "example": "_Role",
+            "default": "_Role",
+            "description": "目标类名"
+          },
+          {
+            "name": "destId",
+            "in": "query",
+            "type": "string",
+            "example": "ccf5456562",
+            "default": "ccf5456562",
+            "description": "目标类对象"
+          },
+          {
+            "name": "destField",
+            "in": "query",
+            "type": "string",
+            "example": "views",
+            "default": "views",
+            "description": "目标关联字段"
+          },
+          {
+            "name": "srcClass",
+            "in": "query",
+            "type": "string",
+            "example": "View",
+            "default": "View",
+            "description": "源类名"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Returns success"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Server Internal error"
+          }
+        },
+        "tags": [
+          "Data"
+        ]
+      },
       "delete": {
         "summary": "删除关联",
         "description": "删除关联",
@@ -1058,156 +1487,6 @@
         ]
       }
     },
-    "/sendsms": {
-      "post": {
-        "security": [],
-        "consumes": [
-          "*"
-        ],
-        "summary": "发送短信验证码",
-        "description": "发送短信,短信验证码发送成功后,则会在缓存中以mobile为键写入, 用户下一步提交时，可以根据此键查询验证通过",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "nationcode",
-            "type": "string",
-            "description": "国家/地区",
-            "enum": [
-              "+86/中国",
-              "+886/中国台湾",
-              "+852/中国香港",
-              "+91/India",
-              "+244/Angola",
-              "+54/Argentina",
-              "+1/American Samoa",
-              "+880/Bangladesh",
-              "+56/Chile",
-              "+855/Cambodia",
-              "+20/Egypt",
-              "+33/France",
-              "+49/Germany",
-              "+62/Indonesia",
-              "+353/Ireland",
-              "+972/Israel",
-              "+39/Italy",
-              "+81/Japan",
-              "+60/Malaysia",
-              "+63/Philippines",
-              "+92/Pakistan",
-              "+82/South Korea",
-              "+46/Sweden",
-              "+65/Singapore",
-              "+27/South Africa",
-              "+66/Thailand",
-              "+971/United Arab Emirates",
-              "+44/United Kingdom",
-              "+84/Vietnam",
-              "+967/Yemen",
-              "+260/Zambia"
-            ],
-            "required": true
-          },
-          {
-            "in": "query",
-            "name": "account",
-            "type": "string",
-            "description": "大陆手机号码",
-            "required": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Returns operation status",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "expire": {
-                  "type": "number"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad Request"
-          },
-          "403": {
-            "description": "Forbidden"
-          },
-          "500": {
-            "description": "Server Internal error"
-          }
-        },
-        "tags": [
-          "Data"
-        ]
-      }
-    },
-    "/verify_code": {
-      "post": {
-        "security": [],
-        "summary": "验证手机号/邮箱是否通过",
-        "description": "验证手机号/邮箱是否通过",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "Action",
-            "type": "string",
-            "description": "验证操作类型",
-            "enum": [
-              "login",
-              "register",
-              "passwordreset",
-              "modifyuser"
-            ],
-            "required": true
-          },
-          {
-            "in": "query",
-            "name": "account",
-            "type": "string",
-            "description": "邮箱或手机号",
-            "required": true
-          },
-          {
-            "in": "query",
-            "name": "code",
-            "type": "integer",
-            "description": "验证码",
-            "required": true
-          },
-          {
-            "in": "body",
-            "name": "body",
-            "schema": {
-              "type": "object",
-              "properties": {
-              }
-            },
-            "description": "扩展参数"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Returns operation status"
-          },
-          "302": {
-            "description": "Returns operation status"
-          },
-          "400": {
-            "description": "Bad Request"
-          },
-          "403": {
-            "description": "Forbidden"
-          },
-          "500": {
-            "description": "Server Internal error"
-          }
-        },
-        "tags": [
-          "Data"
-        ]
-      }
-    },
     "/adddevice": {
       "post": {
         "summary": "序列号添加设备",
@@ -1247,6 +1526,130 @@
         "responses": {
           "200": {
             "description": "Returns success"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Server Internal error"
+          }
+        },
+        "tags": [
+          "Device"
+        ]
+      }
+    },
+    "/producttree": {
+      "get": {
+        "security": [],
+        "summary": "获取产品树",
+        "description": "",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Returns operation status"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Server Internal error"
+          }
+        },
+        "tags": [
+          "Product"
+        ]
+      }
+    },
+    "/station_data": {
+      "post": {
+        "summary": "整站数据",
+        "description": "导入导出整站数据",
+        "consumes": [
+          "multipart/form-data"
+        ],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "formData",
+            "description": "类型",
+            "type": "string"
+          },
+          {
+            "name": "file",
+            "in": "formData",
+            "description": "数据文件",
+            "type": "file"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns operation status"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Server Internal error"
+          }
+        },
+        "tags": [
+          "Data"
+        ]
+      }
+    },
+    "/device_debug": {
+      "post": {
+        "summary": "设备下发调试",
+        "description": "设备下发调试",
+        "parameters": [
+          {
+            "in": "body",
+            "name": "data",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "deviceid": {
+                  "description": "设备Id",
+                  "type": "string",
+                  "example": "5d9652a261"
+                },
+                "messagetype": {
+                  "description": "发送格式",
+                  "type": "string",
+                  "example": "HEX"
+                },
+                "data": {
+                  "description": "报文",
+                  "type": "string",
+                  "example": "680B0001497F0F005"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Returns operation status"
           },
           "400": {
             "description": "Bad Request"

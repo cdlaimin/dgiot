@@ -18,7 +18,6 @@
 -define(GLOBAL_TOPIC, <<"global/dgiot">>).
 -define(DCACHE, dgiotdiskcache).
 -define(DEFREGISTRY, dgiot_global).
-
 -define(CHILD(I, Type, Args), {I, {I, start_link, Args}, permanent, 5000, Type, [I]}).
 
 -define(CHILD2(I, Mod, Type, Args), {I, {Mod, start_link, Args}, permanent, 5000, Type, [Mod]}).
@@ -35,5 +34,5 @@
     cowlib, epgsql, erlydtl, websocket_client,esockd,gen_coap,
     gen_rpc,getopt, goldrush, gpb,gproc,gun,jiffy,luerl,lwm2m_coap,
     minirest,mysql,prometheus,recon,rulesql,ssl_verify_fun,
-    ekka,ibrowse
+    ekka,ibrowse,grpc,hut,emqx,ehttpc,ejdbc
 ]).

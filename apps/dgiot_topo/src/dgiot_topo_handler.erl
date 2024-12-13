@@ -98,7 +98,7 @@ do_request(post_topo, Arg, Context, _Req) ->
 %% OperationId:topo
 %% 请求:post get_konva_thing
 do_request(get_konva_thing, Arg, Context, _Req) ->
-    case dgiot_topo:get_konva_thing(Arg, Context) of
+    case dgiot_product_knova:get_konva_thing(Arg, Context) of
         {ok, Success} ->
             {ok, Success};
         {error, Reason} ->
@@ -109,16 +109,12 @@ do_request(get_konva_thing, Arg, Context, _Req) ->
 %% OperationId:topo
 %% 请求:post post_send_topo
 do_request(post_konva_thing, Arg, Context, _Req) ->
-    case dgiot_topo:edit_konva(Arg, Context) of
+    case dgiot_product_knova:edit_konva(Arg, Context) of
         {ok, Success} ->
             {ok, Success};
         {error, Reason} ->
             {400, Reason}
     end;
-
-do_request(post_dashboard, Arg, Context, _Req) ->
-    dgiot_dashboard:post_dashboard(Arg, Context),
-    {200, <<"success">>};
 
 do_request(get_devicedict, #{<<"deviceid">> := Deviceid}, #{<<"sessionToken">> := SessionToken} = _Context, _Req) ->
 %%    case dgiot_parse:get_object(<<"Device">>, <<"566cf263dc">>, [{"X-Parse-Session-Token", <<"r:e53794ae4bb367b13f73ddd5891e2755">>}], [{from, rest}]) of

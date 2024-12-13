@@ -30,8 +30,10 @@ start(_StartType, _StartArgs) ->
     start_mnesia(),
     dgiot:init_plugins(),
     {ok, Sup} = dgiot_sup:start_link(),
+    dgiot_cron_timer:start(),
     start_plugin(Sup),
     dgiot_pushgateway:start_link(),
+    dgiot_metrics:start(dgiot),
     {ok, Sup}.
 
 stop(_State) ->
@@ -67,7 +69,9 @@ start_plugin(Sup) ->
     lists:map(fun(X) ->
         {_Order, Mod} = X,
         case erlang:function_exported(Mod, start, 1) of
-            true -> Mod:start(Sup);
-            false -> pass
+            true ->
+                Mod:start(Sup);
+            false ->
+                pass
         end
               end, lists:ukeysort(1, NewAcc)).

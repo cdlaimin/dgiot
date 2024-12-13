@@ -22,12 +22,115 @@
 
 -export([
     init/1,
+    dealwith/1,
     parse_frame/3,
     to_frame/1,
+    format_value/3,
     build_req_message/1]
 ).
 
--export([modbus_encoder/4, modbus_decoder/5, is16/1, set_params/3]).
+-export([modbus_encoder/4, modbus_decoder/5, is16/1, set_params/3, decode_data/5, get_datasource/1]).
+
+-define(TYPE, ?MODBUS_RTU).
+
+%% 注册协议参数
+-params(#{
+    <<"slaveid">> => #{
+        order => 1,
+        type => string,
+        required => true,
+        default => <<"0000"/utf8>>,
+        title => #{
+            zh => <<"从机地址"/utf8>>
+        },
+        description => #{
+            zh => <<"从机地址(16进制加0X,例如:0X10,否在是10进制),范围1-247,一个字节"/utf8>>
+        }
+    },
+    <<"operatetype">> => #{
+        order => 2,
+        type => string,
+        required => true,
+        default => #{<<"value">> => <<"readCoils">>, <<"label">> => <<"0X01:读线圈寄存器"/utf8>>},
+        enum => [#{<<"value">> => <<"readCoils">>, <<"label">> => <<"0X01:读线圈寄存器"/utf8>>},
+            #{<<"value">> => <<"readInputs">>, <<"label">> => <<"0X02:读离散输入寄存器"/utf8>>},
+            #{<<"value">> => <<"readHregs">>, <<"label">> => <<"0X03:读保持寄存器"/utf8>>},
+            #{<<"value">> => <<"readIregs">>, <<"label">> => <<"0X04:读输入寄存器"/utf8>>},
+            #{<<"value">> => <<"writeCoil">>, <<"label">> => <<"0X05:写单个线圈寄存器"/utf8>>},
+            #{<<"value">> => <<"writeHreg">>, <<"label">> => <<"0X06:写单个保持寄存器"/utf8>>},
+            #{<<"value">> => <<"writeCoils">>, <<"label">> => <<"0X0f:写多个线圈寄存器"/utf8>>},
+            #{<<"value">> => <<"writeHregs">>, <<"label">> => <<"0X10:写多个保持寄存器"/utf8>>}
+        ],
+        title => #{
+            zh => <<"寄存器功能码"/utf8>>
+        },
+        description => #{
+            zh => <<"寄存器功能码"/utf8>>
+        }
+    },
+    <<"address">> => #{
+        order => 3,
+        type => string,
+        required => true,
+        default => <<"0X00"/utf8>>,
+        title => #{
+            zh => <<"寄存器起始地址"/utf8>>
+        },
+        description => #{
+            zh => <<"寄存器起始地址:原数据地址(16进制加0X,例如:0X10,否在是10进制);8位寄存器,一个字节;16位寄存器,两个字节;32位寄存器,四个字节"/utf8>>
+        }
+    },
+    <<"registersnumber">> => #{
+        order => 4,
+        type => string,
+        required => true,
+        default => <<"1">>,
+        title => #{
+            zh => <<"寄存器个数"/utf8>>
+        },
+        description => #{
+            zh => <<"寄存器个数(多个寄存器个数)"/utf8>>
+        }
+    },
+    <<"originaltype">> => #{
+        order => 5,
+        type => string,
+        required => true,
+        default => #{<<"value">> => <<"bit">>, <<"label">> => <<"位"/utf8>>},
+        enum => [
+            #{<<"value">> => <<"bit">>, <<"label">> => <<"位"/utf8>>},
+            #{<<"value">> => <<"short16_AB">>, <<"label">> => <<"16位 有符号(AB)"/utf8>>},
+            #{<<"value">> => <<"short16_BA">>, <<"label">> => <<"16位 有符号(BA)"/utf8>>},
+            #{<<"value">> => <<"ushort16_AB">>, <<"label">> => <<"16位 无符号(AB)"/utf8>>},
+            #{<<"value">> => <<"ushort16_BA">>, <<"label">> => <<"16位 无符号(BA)"/utf8>>},
+            #{<<"value">> => <<"long32_ABCD">>, <<"label">> => <<"32位 有符号(ABCD)"/utf8>>},
+            #{<<"value">> => <<"long32_CDAB">>, <<"label">> => <<"32位 有符号(CDAB)"/utf8>>},
+            #{<<"value">> => <<"ulong32_ABCD">>, <<"label">> => <<"32位 无符号(ABCD)"/utf8>>},
+            #{<<"value">> => <<"ulong32_CDAB">>, <<"label">> => <<"32位 无符号(CDAB)"/utf8>>},
+            #{<<"value">> => <<"float32_ABCD">>, <<"label">> => <<"32位 浮点数(ABCD)"/utf8>>},
+            #{<<"value">> => <<"float32_CDAB">>, <<"label">> => <<"32位 浮点数(CDAB)"/utf8>>}
+        ],
+        title => #{
+            zh => <<"数据格式"/utf8>>
+        },
+        description => #{
+            zh => <<"数据格式"/utf8>>
+        }
+    }
+}).
+
+%% 注册协议类型
+-protocol_type(#{
+    cType => ?TYPE,
+    type => <<"energy">>,
+    colum => 10,
+    title => #{
+        zh => <<"MODBUS RTU协议"/utf8>>
+    },
+    description => #{
+        zh => <<"MODBUS RTU协议"/utf8>>
+    }
+}).
 
 init(State) ->
     State#{<<"req">> => [], <<"ts">> => dgiot_datetime:now_ms(), <<"interval">> => 300}.
@@ -43,54 +146,55 @@ init(State) ->
 %%    {ok, State}.
 
 to_frame(#{
-    <<"value">> := Data,
-    <<"addr">> := SlaveId,
-    <<"productid">> := ProductId,
-    <<"di">> := Address
+    <<"registersnumber">> := Quality,
+    <<"slaveid">> := SlaveId,
+    <<"operatetype">> := Operatetype,
+    <<"originaltype">> := Originaltype,
+    <<"address">> := Address
 }) ->
-    encode_data(Data, Address, SlaveId, ProductId);
+    encode_data(Quality, Address, SlaveId, Operatetype, Originaltype);
 
 %%<<"cmd">> => Cmd,
 %%<<"gateway">> => DtuAddr,
 %%<<"addr">> => SlaveId,
 %%<<"di">> => Address
 to_frame(#{
-    <<"value">> := Value,
+    <<"registersnumber">> := Quality,
     <<"gateway">> := DtuAddr,
-    <<"addr">> := SlaveId,
-    <<"di">> := Address
+    <<"slaveid">> := SlaveId,
+    <<"originaltype">> := Originaltype,
+    <<"address">> := Address
 }) ->
     case dgiot_device:get_subdevice(DtuAddr, SlaveId) of
         not_find -> [];
         [ProductId, _DevAddr] ->
-            encode_data(Value, Address, SlaveId, ProductId)
+            encode_data(Quality, Address, SlaveId, ProductId, Originaltype)
     end.
 
 %% Quality 读的时候代表寄存器个数，16位的寄存器，一个寄存器表示两个字节，写的时候代表实际下发值
-encode_data(Data, Address, SlaveId, ProductId) ->
-    lists:foldl(fun({_Cmd, Quality, OperateType}, Acc) ->
-        {FunCode, NewQuality} =
-            case OperateType of
-                <<"readCoils">> -> {?FC_READ_COILS, dgiot_utils:to_int(dgiot_utils:to_int(Quality) / 2)};
-                <<"readInputs">> -> {?FC_READ_INPUTS, dgiot_utils:to_int(dgiot_utils:to_int(Quality) / 2)};
-                <<"readHregs">> -> {?FC_READ_HREGS, dgiot_utils:to_int(dgiot_utils:to_int(Quality) / 2)};
-                <<"readIregs">> -> {?FC_READ_IREGS, dgiot_utils:to_int(dgiot_utils:to_int(Quality) / 2)};
-                <<"writeCoil">> -> {?FC_WRITE_COIL, dgiot_utils:to_int(Quality)};
-                <<"writeHreg">> -> {?FC_WRITE_HREG, dgiot_utils:to_int(Quality)}; %%需要校验，写多个线圈是什么状态
-                <<"writeCoils">> -> {?FC_WRITE_COILS, dgiot_utils:to_int(Quality)};
-                <<"writeHregs">> -> {?FC_WRITE_HREGS, dgiot_utils:to_int(Quality)}; %%需要校验，写多个保持寄存器是什么状态
-                _ -> {?FC_READ_HREGS, dgiot_utils:to_int(dgiot_utils:to_int(Quality) / 2)}
-            end,
-        <<H:8, L:8>> = dgiot_utils:hex_to_binary(is16(Address)),
-        <<Sh:8, Sl:8>> = dgiot_utils:hex_to_binary(is16(SlaveId)),
-        RtuReq = #rtu_req{
-            slaveId = Sh * 256 + Sl,
-            funcode = dgiot_utils:to_int(FunCode),
-            address = H * 256 + L,
-            quality = NewQuality
-        },
-        Acc ++ [build_req_message(RtuReq)]
-                end, [], modbus_encoder(ProductId, SlaveId, Address, Data)).
+encode_data(Quality, Address, SlaveId, OperateType, Originaltype) ->
+    FunCode =
+        case OperateType of
+            <<"readCoils">> -> ?FC_READ_COILS;
+            <<"readInputs">> -> ?FC_READ_INPUTS;
+            <<"readHregs">> -> ?FC_READ_HREGS;
+            <<"readIregs">> -> ?FC_READ_IREGS;
+            <<"writeCoil">> -> ?FC_WRITE_COIL;
+            <<"writeHreg">> -> ?FC_WRITE_HREG; %%需要校验，写多个线圈是什么状态
+            <<"writeCoils">> -> ?FC_WRITE_COILS;
+            <<"writeHregs">> -> ?FC_WRITE_HREGS; %%需要校验，写多个保持寄存器是什么状态
+            _ -> ?FC_READ_HREGS
+        end,
+    <<H:8, L:8>> = dgiot_utils:hex_to_binary(is16(Address)),
+    <<Sh:8, Sl:8>> = dgiot_utils:hex_to_binary(is16(SlaveId)),
+    NewQuality = dgiot_utils:to_int(get_len(Quality, Originaltype) / 2),
+    RtuReq = #rtu_req{
+        slaveId = Sh * 256 + Sl,
+        funcode = dgiot_utils:to_int(FunCode),
+        address = H * 256 + L,
+        quality = NewQuality
+    },
+    build_req_message(RtuReq).
 
 is16(<<"0X", Data/binary>>) when size(Data) == 4 ->
     Data;
@@ -101,97 +205,86 @@ is16(<<"0X", Data/binary>>) when size(Data) > 4 ->
 is16(<<"0X", Data/binary>>) ->
     <<"00", Data/binary>>;
 
-is16(<<"00", Data/binary>>) when size(Data) == 2 ->
+is16(<<"0x", Data/binary>>) when size(Data) == 4 ->
     Data;
 
-is16(<<"256">>) ->
-    <<"0100">>;
+is16(<<"0x", Data/binary>>) when size(Data) > 4 ->
+    Data;
 
-is16(Data) when size(Data) > 1 ->
+is16(<<"0x", Data/binary>>) ->
     <<"00", Data/binary>>;
 
-is16(Data) ->
-    <<"000", Data/binary>>.
+is16(<<"00", Data/binary>>) ->
+    is16(Data);
 
-set_params(Basedata, ProductId, DevAddr) ->
-    case dgiot_parse:get_object(<<"Product">>, ProductId) of
-        {ok, #{<<"name">> := Productname, <<"config">> := #{<<"basedate">> := #{<<"params">> := Params}}}} ->
-            Payloads =
-                lists:foldl(fun(X, Acc) ->
-                    case X of
-                        #{<<"identifier">> := Identifier,
-                            <<"protocol">> := <<"modbus">>,
-                            <<"slaveid">> := SlaveId,
-                            <<"address">> := Address,
-                            <<"bytes">> := Bytes,
-                            <<"operatetype">> := OperateType,
-                            <<"setting">> := Setting,
-                            <<"name">> := Name} ->
-                            case maps:find(Identifier, Basedata) of
-                                error ->
-                                    Acc;
-                                {ok, Value} when erlang:byte_size(Value) == 0 ->
-                                    Acc;
-                                {ok, Value} ->
-                                    FunCode =
-                                        case OperateType of
-                                            <<"readCoils">> -> ?FC_READ_COILS;
-                                            <<"readInputs">> -> ?FC_READ_INPUTS;
-                                            <<"readHregs">> -> ?FC_READ_HREGS;
-                                            <<"readIregs">> -> ?FC_READ_IREGS;
-                                            <<"writeCoil">> -> ?FC_WRITE_COIL;
-                                            <<"writeHreg">> -> ?FC_WRITE_HREG;
-                                            <<"writeCoils">> -> ?FC_WRITE_COILS; %%需要校验，写多个线圈是什么状态
-                                            <<"writeHregs">> -> ?FC_WRITE_HREGS; %%需要校验，写多个保持寄存器是什么状态
-                                            _ -> ?FC_READ_HREGS
-                                        end,
-                                    <<H:8, L:8>> = dgiot_utils:hex_to_binary(is16(Address)),
-                                    <<Sh:8, Sl:8>> = dgiot_utils:hex_to_binary(is16(SlaveId)),
-                                    Str1 = re:replace(Setting, "%s", "(" ++ dgiot_utils:to_list(Value) ++ ")", [global, {return, list}]),
-                                    Value1 = dgiot_utils:to_int(dgiot_task:string2value(Str1)),
+is16(Data) ->
+    IntData = dgiot_utils:to_int(Data),
+    dgiot_utils:binary_to_hex(<<IntData:16>>).
+
+set_params(Payload, _ProductId, _DevAddr) ->
+    Payloads =
+        maps:fold(fun(_, #{
+            <<"dataForm">> := #{
+                <<"protocol">> := <<"MODBUSRTU">>,
+                <<"control">> := Setting},
+            <<"dataSource">> := #{
+                <<"slaveid">> := SlaveId,
+                <<"address">> := Address,
+                <<"originaltype">> := Originaltype,
+                <<"operatetype">> := OperateType} = DataSource
+        } = Data, Acc) ->
+            case maps:find(<<"value">>, Data) of
+                error ->
+                    Acc;
+                {ok, Value} when erlang:byte_size(Value) == 0 ->
+                    Acc;
+                {ok, Value} ->
+                    FunCode =
+                        case OperateType of
+                            <<"readCoils">> -> ?FC_READ_COILS;
+                            <<"readInputs">> -> ?FC_READ_INPUTS;
+                            <<"readHregs">> -> ?FC_READ_HREGS;
+                            <<"readIregs">> -> ?FC_READ_IREGS;
+                            <<"writeCoil">> -> ?FC_WRITE_COIL;
+                            <<"writeHreg">> -> ?FC_WRITE_HREG;
+                            <<"writeCoils">> -> ?FC_WRITE_COILS; %%需要校验，写多个线圈是什么状态
+                            <<"writeHregs">> -> ?FC_WRITE_HREGS; %%需要校验，写多个保持寄存器是什么状态
+                            _ -> ?FC_READ_HREGS
+                        end,
+                    <<H:8, L:8>> = dgiot_utils:hex_to_binary(is16(Address)),
+                    <<Sh:8, Sl:8>> = dgiot_utils:hex_to_binary(is16(SlaveId)),
+                    Str1 = re:replace(Setting, "%{d}", "(" ++ dgiot_utils:to_list(Value) ++ ")", [global, {return, list}]),
+                    Value1 = dgiot_utils:to_int(dgiot_task:string2value(Str1, <<"type">>)),
 %%                                    NewBt = Bytes * 8,
-                                    Registersnumber = maps:get(<<"registersnumber">>, X, <<"1">>),
-                                    RtuReq = #rtu_req{
-                                        slaveId = Sh * 256 + Sl,
-                                        funcode = dgiot_utils:to_int(FunCode),
-                                        address = H * 256 + L,
-                                        registersnumber = dgiot_utils:to_int(Registersnumber),
-                                        dataByteSize = dgiot_utils:to_int(Bytes),
-                                        quality = Value1
-                                    },
-                                    DeviceId = dgiot_parse:get_deviceid(ProductId, DevAddr),
-                                    DeviceName =
-                                        case dgiot_device:lookup(DeviceId) of
-                                            {ok, {[_, _, _, DeviceName1, _, _], _}} ->
-                                                DeviceName1;
-                                            _ ->
-                                                <<"">>
-                                        end,
-                                    Sessiontoken = maps:get(<<"sessiontoken">>, Basedata, <<"">>),
-                                    {Username, Acl} =
-                                        case dgiot_auth:get_session(Sessiontoken) of
-                                            #{<<"username">> := Name1, <<"ACL">> := Acl1} ->
-                                                {Name1, Acl1};
-                                            _ ->
-                                                {<<"">>, #{}}
-                                        end,
-                                    ?MLOG(info, #{<<"clientid">> => DeviceId, <<"username">> => Username, <<"status">> => <<"ONLINE">>, <<"ACL">> => Acl, <<"devaddr">> => DevAddr, <<"productid">> => ProductId, <<"devicename">> => DeviceName, <<"productname">> => Productname, <<"thingname">> => Name, <<"protocol">> => <<"modbus">>, <<"identifier">> => Identifier, <<"value">> => Value1}, ['device_operationlog']),
-                                    Acc ++ [build_req_message(RtuReq)];
-                                _ ->
-                                    Acc
-                            end;
-                        _ ->
-                            Acc
-                    end
-                            end, [], Params),
-            Payloads;
-        _ ->
-            ?LOG(info, "NoProduct: ~p", [ProductId]),
-            pass
-    end.
+                    Registersnumber = maps:get(<<"registersnumber">>, DataSource, <<"1">>),
+                    Bytes = get_len(Registersnumber, Originaltype),
+                    RtuReq = #rtu_req{
+                        slaveId = Sh * 256 + Sl,
+                        funcode = dgiot_utils:to_int(FunCode),
+                        address = H * 256 + L,
+                        registersnumber = dgiot_utils:to_int(Registersnumber),
+                        dataByteSize = dgiot_utils:to_int(Bytes),
+                        quality = Value1
+                    },
+                    Acc ++ [build_req_message(RtuReq)];
+                _ ->
+                    Acc
+            end
+                  end, [], Payload),
+    Payloads.
+
+%% 010300000002C40B 01030438A93E3B76C0
+dealwith(<<SlaveId:8, FunCode:8, Address:16, _:4/binary, SlaveId:8, FunCode:8, Rest/binary>>) ->
+    {ok, #{<<"buff">> => <<SlaveId:8, FunCode:8, Rest/binary>>, <<"slaveId">> => SlaveId, <<"address">> => Address}};
+
+dealwith(Buff) ->
+    Buff.
 
 %rtu modbus
 parse_frame(<<>>, Acc, _State) -> {<<>>, Acc};
+
+parse_frame(Buff, Acc, _State) when size(Buff) < 6 ->
+    {<<>>, Acc};
 
 parse_frame(<<MbAddr:8, BadCode:8, ErrorCode:8, Crc:2/binary>> = Buff, Acc,
     #{<<"addr">> := DtuAddr} = State) ->
@@ -241,7 +334,7 @@ parse_frame(<<SlaveId:8, _/binary>> = Buff, Acc, #{<<"dtuaddr">> := DtuAddr, <<"
     end;
 %rtu modbus
 parse_frame(_Other, Acc, _State) ->
-    ?LOG(error, "_Other ~p", [_Other]),
+%%    ?LOG(error, "_Other ~p", [_Other]),
     {error, Acc}.
 
 decode_data(Buff, ProductId, DtuAddr, Address, Acc) ->
@@ -307,7 +400,7 @@ get_write(ResponseData, SlaveId, FunCode, _DtuAddr, ProductId, Address, Acc) ->
 build_req_message(Req) when is_record(Req, rtu_req) ->
     % validate
     if
-        (Req#rtu_req.slaveId < 0) or (Req#rtu_req.slaveId > 247) ->
+        (Req#rtu_req.slaveId < 0) or (Req#rtu_req.slaveId > 255) ->
             throw({argumentError, Req#rtu_req.slaveId});
         true -> ok
     end,
@@ -322,7 +415,7 @@ build_req_message(Req) when is_record(Req, rtu_req) ->
         true -> ok
     end,
     if
-        (Req#rtu_req.quality < 0) or (Req#rtu_req.quality > 2000) ->
+        (Req#rtu_req.quality < 0) or (Req#rtu_req.quality > 65535) ->
             throw({argumentError, Req#rtu_req.quality});
         true -> ok
     end,
@@ -439,20 +532,25 @@ modbus_decoder(ProductId, SlaveId, Address, Data, Acc1) ->
                 case X of
                     #{<<"identifier">> := Identifier,
                         <<"dataForm">> := #{
+                            <<"strategy">> := Strategy,
+                            <<"protocol">> := <<"MODBUSRTU">>},
+                        <<"dataSource">> := #{
                             <<"slaveid">> := OldSlaveid,
-                            <<"address">> := OldAddress,
-                            <<"protocol">> := <<"modbus">>
-                        }} ->
+                            <<"address">> := OldAddress}
+                    } when Strategy =/= <<"计算值"/utf8>> ->
                         <<H:8, L:8>> = dgiot_utils:hex_to_binary(modbus_rtu:is16(OldSlaveid)),
                         <<Sh:8, Sl:8>> = dgiot_utils:hex_to_binary(modbus_rtu:is16(OldAddress)),
                         NewSlaveid = H * 256 + L,
                         NewAddress = Sh * 256 + Sl,
                         case {SlaveId, Address} of
                             {NewSlaveid, NewAddress} ->
-                                case format_value(Data, X) of
+                                case catch format_value(Data, X, Props) of
+                                    {map, Value} ->
+                                        maps:merge(Acc, Value);
                                     {Value, _Rest} ->
                                         Acc#{Identifier => Value};
-                                    _ -> Acc
+                                    _A ->
+                                        Acc
                                 end;
                             _ ->
                                 Acc
@@ -469,11 +567,15 @@ modbus_encoder(ProductId, SlaveId, Address, Value) ->
         {ok, #{<<"thing">> := #{<<"properties">> := Props}}} ->
             lists:foldl(fun(X, Acc) ->
                 case X of
-                    #{<<"accessMode">> := <<"r">>, <<"dataForm">> := #{<<"address">> := Address, <<"protocol">> := <<"modbus">>,
-                        <<"data">> := Data, <<"slaveid">> := SlaveId, <<"operatetype">> := Operatetype}} ->
+                    #{<<"accessMode">> := <<"r">>,
+                        <<"dataSource">> := #{<<"address">> := Address, <<"data">> := Data, <<"slaveid">> := SlaveId, <<"operatetype">> := Operatetype},
+                        <<"dataForm">> := #{<<"protocol">> := <<"MODBUSRTU">>}
+                    } ->
                         Acc ++ [{<<"r">>, Data, Operatetype}];
-                    #{<<"accessMode">> := Cmd, <<"dataForm">> := #{<<"address">> := Address, <<"protocol">> := <<"modbus">>,
-                        <<"data">> := _Quantity, <<"slaveid">> := SlaveId, <<"operatetype">> := Operatetype}} ->
+                    #{<<"accessMode">> := Cmd,
+                        <<"dataSource">> := #{<<"address">> := Address, <<"data">> := _Quantity, <<"slaveid">> := SlaveId, <<"operatetype">> := Operatetype},
+                        <<"dataForm">> := #{<<"protocol">> := <<"MODBUSRTU">>}
+                    } ->
                         Acc ++ [{Cmd, Value, Operatetype}];
                     _Ot ->
                         Acc
@@ -493,123 +595,190 @@ modbus_encoder(ProductId, SlaveId, Address, Value) ->
 %% 0x78  |  0x56  |  0x34  |  0x12
 
 format_value(Buff, #{
-    <<"dataType">> := #{<<"type">> := <<"geopoint">>, <<"gpstype">> := <<"NMEA0183">>}}) ->
+    <<"dataType">> := #{<<"type">> := <<"geopoint">>, <<"gpstype">> := <<"NMEA0183">>}}, _Props) ->
     {Longitude, Latitude} = dgiot_gps:nmea0183_frame(Buff),
     {<<Longitude/binary, "_", Latitude/binary>>, <<"Rest">>};
 
 format_value(Buff, #{
     <<"accessMode">> := <<"rw">>,
-    <<"dataForm">> := DataForm} = X) ->
+    <<"dataSource">> := DataSource} = X, _Props) ->
     format_value(Buff, X#{<<"accessMode">> => <<"r">>,
-        <<"dataForm">> => DataForm#{<<"data">> => byte_size(Buff)}
-    });
+        <<"dataSource">> => DataSource#{<<"data">> => byte_size(Buff)}
+    }, _Props);
 
-format_value(Buff, #{<<"dataForm">> := #{
-    <<"data">> := Len,
-    <<"originaltype">> := <<"bit">>
-}}) ->
-    IntLen = dgiot_utils:to_int(Len),
-    Size = max(2, IntLen) * 8,
-    <<Value:Size, Rest/binary>> = Buff,
-    {Value, Rest};
+format_value(Buff, #{<<"identifier">> := BitIdentifier,
+    <<"dataSource">> := #{
+        <<"originaltype">> := <<"bit">>
+    }}, Props) ->
+    <<BitValue:8, _/binary>> = Buff,
+    Values =
+        lists:foldl(fun(X, Acc) ->
+            case X of
+                #{<<"identifier">> := Identifier,
+                    <<"dataForm">> := #{
+                        <<"protocol">> := <<"MODBUSRTU">>,
+                        <<"strategy">> := <<"计算值"/utf8>>},
+                    <<"dataSource">> := #{
+                        <<"slaveid">> := BitIdentifier,
+                        <<"address">> := Offset,
+                        <<"registersnumber">> := Num,
+                        <<"originaltype">> := Originaltype}
+                } ->
+                    IntOffset = dgiot_utils:to_int(Offset),
+                    IntNum = dgiot_utils:to_int(Num),
+                    IntLen = get_len(IntNum, Originaltype),
+                    IntOffsetLen = get_len(IntOffset, Originaltype),
+                    Value =
+                        case IntOffset of
+                            0 ->
+                                <<V:IntLen/binary, _/binary>> = Buff,
+                                case catch format_value(V, X, Props) of
+                                    {Value1, _Rest} ->
+                                        Value1;
+                                    _ ->
+                                        V
+                                end;
+                            _ ->
+                                <<_:IntOffsetLen/binary, V:IntLen/binary, _/binary>> = Buff,
+                                case catch format_value(V, X, Props) of
+                                    {Value1, _Rest} ->
+                                        Value1;
+                                    _ ->
+                                        V
+                                end
+                        end,
+                    Acc#{Identifier => Value};
+                _ ->
+                    Acc
+            end
+                    end, #{BitIdentifier => BitValue}, Props),
+    {map, Values};
 
-format_value(Buff, #{<<"dataForm">> := #{
-    <<"data">> := Len,
+format_value(Buff, #{<<"dataSource">> := #{
+    <<"registersnumber">> := Num,
     <<"originaltype">> := <<"short16_AB">>
-}}) ->
-    IntLen = dgiot_utils:to_int(Len),
-    Size = max(2, IntLen) * 8,
+}}, _Props) ->
+    IntNum = dgiot_utils:to_int(Num),
+    Size = IntNum * 2 * 8,
     <<Value:Size/signed-big-integer, Rest/binary>> = Buff,
     {Value, Rest};
 
-format_value(Buff, #{<<"dataForm">> := #{
-    <<"data">> := Len,
+format_value(Buff, #{<<"dataSource">> := #{
+    <<"registersnumber">> := Num,
     <<"originaltype">> := <<"short16_BA">>
-}}) ->
-    IntLen = dgiot_utils:to_int(Len),
-    Size = max(2, IntLen) * 8,
+}}, _Props) ->
+    IntNum = dgiot_utils:to_int(Num),
+    Size = IntNum * 2 * 8,
     <<Value:Size/signed-little-integer, Rest/binary>> = Buff,
     {Value, Rest};
 
-format_value(Buff, #{<<"dataForm">> := #{
-    <<"data">> := Len,
+format_value(Buff, #{<<"dataSource">> := #{
+    <<"registersnumber">> := Num,
     <<"originaltype">> := <<"ushort16_AB">>
-}}) ->
-    IntLen = dgiot_utils:to_int(Len),
-    Size = max(2, IntLen) * 8,
+}}, _Props) ->
+    IntNum = dgiot_utils:to_int(Num),
+    Size = IntNum * 2 * 8,
     <<Value:Size/unsigned-big-integer, Rest/binary>> = Buff,
     {Value, Rest};
 
-format_value(Buff, #{<<"dataForm">> := #{
-    <<"data">> := Len,
+format_value(Buff, #{<<"dataSource">> := #{
+    <<"registersnumber">> := Num,
     <<"originaltype">> := <<"ushort16_BA">>
-}}) ->
-    IntLen = dgiot_utils:to_int(Len),
-    Size = max(2, IntLen) * 8,
+}}, _Props) ->
+    IntNum = dgiot_utils:to_int(Num),
+    Size = IntNum * 2 * 8,
     <<Value:Size/unsigned-little-integer, Rest/binary>> = Buff,
     {Value, Rest};
 
-format_value(Buff, #{<<"dataForm">> := #{
-    <<"data">> := Len,
+format_value(Buff, #{<<"dataSource">> := #{
+    <<"registersnumber">> := Num,
     <<"originaltype">> := <<"long32_ABCD">>
-}}) ->
-    IntLen = dgiot_utils:to_int(Len),
-    Size = max(4, IntLen) * 8,
+}}, _Props) ->
+    IntNum = dgiot_utils:to_int(Num),
+    Size = IntNum * 4 * 8,
     <<H:2/binary, L:2/binary, Rest/binary>> = Buff,
     <<Value:Size/integer>> = <<H/binary, L/binary>>,
     {Value, Rest};
 
-format_value(Buff, #{<<"dataForm">> := #{
-    <<"data">> := Len,
+format_value(Buff, #{<<"dataSource">> := #{
     <<"originaltype">> := <<"long32_CDAB">>
-}}) ->
-    IntLen = dgiot_utils:to_int(Len),
-    Size = max(4, IntLen) * 8,
+}}, _Props) ->
     <<H:2/binary, L:2/binary, Rest/binary>> = Buff,
-    <<Value:Size/integer>> = <<L/binary, H/binary>>,
+    <<Value:32/integer>> = <<L/binary, H/binary>>,
     {Value, Rest};
 
-format_value(Buff, #{<<"dataForm">> := #{
-    <<"data">> := Len,
+format_value(Buff, #{<<"dataSource">> := #{
     <<"originaltype">> := <<"ulong32_ABCD">>
-}}) ->
-    IntLen = dgiot_utils:to_int(Len),
-    Size = max(4, IntLen) * 8,
+}}, _Props) ->
     <<H:2/binary, L:2/binary, Rest/binary>> = Buff,
-    <<Value:Size/integer>> = <<H/binary, L/binary>>,
+    <<Value:32/integer>> = <<H/binary, L/binary>>,
     {Value, Rest};
 
-format_value(Buff, #{<<"dataForm">> := #{
-    <<"data">> := Len,
+format_value(Buff, #{<<"dataSource">> := #{
     <<"originaltype">> := <<"ulong32_CDAB">>
-}}) ->
-    IntLen = dgiot_utils:to_int(Len),
-    Size = max(4, IntLen) * 8,
+}}, _Props) ->
     <<H:2/binary, L:2/binary, Rest/binary>> = Buff,
-    <<Value:Size/integer>> = <<L/binary, H/binary>>,
+    <<Value:32/integer>> = <<L/binary, H/binary>>,
     {Value, Rest};
 
-format_value(Buff, #{<<"dataForm">> := #{
-    <<"data">> := Len,
+format_value(Buff, #{<<"dataSource">> := #{
     <<"originaltype">> := <<"float32_ABCD">>
-}}) ->
-    IntLen = dgiot_utils:to_int(Len),
-    Size = max(4, IntLen) * 8,
+}}, _Props) ->
     <<H:2/binary, L:2/binary, Rest/binary>> = Buff,
-    <<Value:Size/float>> = <<H/binary, L/binary>>,
+    <<Value:32/float>> = <<H/binary, L/binary>>,
     {Value, Rest};
 
-format_value(Buff, #{<<"dataForm">> := #{
-    <<"data">> := Len,
+format_value(Buff, #{<<"dataSource">> := #{
     <<"originaltype">> := <<"float32_CDAB">>
-}}) ->
-    IntLen = dgiot_utils:to_int(Len),
-    Size = max(4, IntLen) * 8,
+}}, _Props) ->
     <<H:2/binary, L:2/binary, Rest/binary>> = Buff,
-    <<Value:Size/float>> = <<L/binary, H/binary>>,
+    <<Value:32/float>> = <<L/binary, H/binary>>,
     {Value, Rest};
 
 %% @todo 其它类型处理
-format_value(_, #{<<"identifier">> := Field}) ->
-    ?LOG(info, "Field ~p", [Field]),
-    throw({field_error, <<Field/binary, " is not validate">>}).
+format_value(Buff, _, _) ->
+%%    ?LOG(info, "Field ~p", [Field]),
+%%    throw({field_error, <<Field/binary, " is not validate">>}),
+    <<Value:8/signed-big-integer, Rest/binary>> = Buff,
+    {Value, Rest}.
+
+%% 获取寄存器字节长度
+get_len(IntNum, <<"short16_AB">>) ->
+    dgiot_utils:to_int(IntNum) * 2;
+
+get_len(IntNum, <<"short16_BA">>) ->
+    dgiot_utils:to_int(IntNum) * 2;
+
+get_len(IntNum, <<"ushort16_AB">>) ->
+    dgiot_utils:to_int(IntNum) * 2;
+
+get_len(IntNum, <<"ushort16_BA">>) ->
+    dgiot_utils:to_int(IntNum) * 2;
+
+get_len(IntNum, <<"long32_ABCD">>) ->
+    dgiot_utils:to_int(IntNum) * 4;
+
+get_len(IntNum, <<"long32_CDAB">>) ->
+    dgiot_utils:to_int(IntNum) * 4;
+
+get_len(IntNum, <<"ulong32_ABCD">>) ->
+    dgiot_utils:to_int(IntNum) * 4;
+
+get_len(IntNum, <<"ulong32_CDAB">>) ->
+    dgiot_utils:to_int(IntNum) * 4;
+
+get_len(IntNum, <<"float32_ABCD">>) ->
+    dgiot_utils:to_int(IntNum) * 4;
+
+get_len(IntNum, <<"float32_CDAB">>) ->
+    dgiot_utils:to_int(IntNum) * 4;
+
+get_len(IntNum, _Originaltype) ->
+    dgiot_utils:to_int(IntNum) * 2.
+
+
+get_datasource(#{<<"operatetype">> := <<"writeHreg">>, <<"data">> := Data} = DataSource) ->
+    DataSource#{<<"data">> => Data};
+
+get_datasource(DataSource) ->
+    DataSource.

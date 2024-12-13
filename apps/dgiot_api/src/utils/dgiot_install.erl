@@ -139,7 +139,7 @@ clean_database(List) ->
                         false ->
                             case List == [<<"*">>] orelse lists:member(Table, List) of
                                 true ->
-                                    dgiot_parse:del_trigger(Table),
+                                    dgiot_parse_hook:del_trigger(Table),
                                     case dgiot_parse:del_table(Table) of
                                         ok ->
                                             case dgiot_parse:del_schemas(Table) of
@@ -243,7 +243,7 @@ get_roletemp(Role) ->
 generate_role(Roles, Result) ->
     Fun =
         fun(#{<<"name">> := Name} = Role) ->
-            {ok, AppUser} = dgiot_parse_handler:create_user_for_app(Name),
+            {ok, AppUser} = dgiot_parse_auth:create_user_for_app(Name),
             ?LOG(info,"AppUser ~p ", [AppUser]),
             NewUsers = maps:get(<<"users">>, Role, []) ++ [AppUser],
             NewRole = Role#{
@@ -339,13 +339,15 @@ generate_rule(Result) ->
                                     [] ->
                                         Acc1;
                                     _ ->
-                                        RuleName = list_to_binary(string:to_upper(binary_to_list(OperationId))),
+                                        NewOperationId =  get_OperationID(OperationId),
+                                        RuleName = list_to_binary(string:to_upper(binary_to_list(NewOperationId))),
+                                        dgiot_data:get(swaggerApi),
                                         R = case maps:get(<<"tags">>, Info, []) of
                                                 [] ->
                                                     save_rule(RuleName, <<"0">>, Info);
                                                 [Tag | _] ->
                                                     PId = re:replace(Tag, <<"_">>, <<>>, [{return, binary}]),
-                                                    PName = maps:get(Tag, Tags, unicode:characters_to_binary(<<PId/binary, <<" Manager"/utf8>>/binary>>)),
+                                                    PName = maps:get(Tag, Tags, unicode:characters_to_binary(<<PId/binary, <<"管理"/utf8>>/binary>>)),
                                                     PRuleName = <<PId/binary, "_ALL">>,
                                                     Parent = #{
                                                         <<"summary">> =>  PName,
@@ -545,3 +547,15 @@ get_install_cfg(Product) ->
         false ->
             {error, <<"Not Find Install Script.">>}
     end.
+
+get_OperationID(OperationID1) ->
+    OperationID = dgiot_utils:to_binary(OperationID1),
+    lists:foldl(fun({NewType, _Mod},  Acc) ->
+        ApiType = <<"_", NewType/binary, "_">>,
+        case re:run(OperationID, ApiType) of
+            {match, _} ->
+                 re:replace(OperationID, ApiType, <<"_classes_">>, [global, {return, binary}, unicode]);
+            _ ->
+                Acc
+        end
+                end,  OperationID, dgiot_data:get(swaggerApi)).

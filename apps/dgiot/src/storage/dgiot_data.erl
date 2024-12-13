@@ -32,9 +32,9 @@
 -include("dgiot_cron.hrl").
 
 -export([init/0, init/1, init/2, destroy/1, size/1]).
--export([insert/2, save/2, delete/1, match/1, match_object/2, match_limit/2, match_safe_do/3, match_object/3, match_delete/1, select/2, lookup/1, page/6, update_counter/2]).
+-export([insert/2, save/2, delete/1, delete_all_objects/1, match/1, match_object/2, match_limit/2, match_safe_do/3, match_object/3, match_delete/1, select/2, lookup/1, page/6, update_counter/2]).
 -export([insert/3, delete/2, match/2, match/3, match_delete/2, match_limit/3, match_safe_do/4, lookup/2, search/2, search/3, dets_search/2, dets_search/3, loop/2, dets_loop/3, update_counter/3]).
--export([set_consumer/2, set_consumer/3, get_consumer/2, get/1, get/2, clear/1, search_data/0]).
+-export([set_consumer/2, set_consumer/3, get_consumer/2, get/1, get/2, clear/1, search_data/0, values/2, keys/1]).
 -define(DB, dgiot_data).
 -define(ETS, ets).
 -define(DETS, dets).
@@ -63,7 +63,6 @@ search_data() ->
 init() ->
     init(?CONSUMER),
     init(?DB),
-    init(?DGIOT_CRON),
     init(?CRON_DB).
 
 init(Name) ->
@@ -107,6 +106,14 @@ save(Name, Value) ->
     end.
 
 
+delete_all_objects(Name) ->
+    case safe(Name) of
+        false ->
+            pass;
+        _ ->
+            ?ETS:delete_all_objects(Name)
+    end.
+
 delete(Key) ->
     delete(?DB, Key).
 delete(Name, Key) ->
@@ -116,7 +123,6 @@ delete(Name, Key) ->
         _ ->
             ?ETS:delete(Name, Key)
     end.
-
 
 lookup(Key) ->
     lookup(?DB, Key).
@@ -131,6 +137,24 @@ lookup(Name, Key) ->
                 [Value | _] -> {ok, Value}
             end
     end.
+
+values(Name, Key) ->
+    case safe(Name) of
+        false ->
+            {error, not_find};
+        _ ->
+            case ?ETS:lookup(Name, Key) of
+                [] ->
+                    {error, not_find};
+                [{Key, _Value} | _] = Values ->
+                    proplists:get_all_values(Key, Values);
+                Values ->
+                    Values
+            end
+    end.
+
+keys(Name) ->
+    lists:flatten(ets:match(Name, {'$1', '_'})).
 
 get(Key) ->
     get(?DB, Key).
@@ -250,7 +274,6 @@ loop(Name, Fun, Key) ->
                 '$end_of_table' -> ok
             end
     end.
-
 
 search(Name, Fun) ->
     search(?ETS, Name, Fun).

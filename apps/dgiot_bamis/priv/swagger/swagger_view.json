@@ -1,0 +1,114 @@
+{
+  "definitions": {},
+  "paths": {
+  },
+  "tags": [],
+  "paths": {
+    "/dashboard": {
+      "post": {
+        "description": "启动任务推送大屏数据",
+        "parameters": [
+          {
+            "name": "dashboardId",
+            "description": "大屏ID",
+            "in": "query",
+            "required": true,
+            "type": "string",
+            "default": "32511dbfe5"
+          },
+          {
+            "in": "body",
+            "name": "data",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns instance data"
+          },
+          "404": {
+            "description": "object not found",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        },
+        "summary": "大屏数据",
+        "tags": [
+          "View"
+        ]
+      }
+    },
+    "/amis": {
+      "post": {
+        "summary": "amis变量替换",
+        "description": "amis变量替换",
+        "parameters": [
+          {
+            "name": "viewid",
+            "description": "视图Id",
+            "in": "query",
+            "required": true,
+            "type": "string",
+            "default": "18d4597c44"
+          },
+          {
+            "in": "body",
+            "name": "render",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns operation status",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string"
+                },
+                "data": {
+                  "type": "object",
+                  "properties": {
+                    "resultType": {
+                      "type": "string"
+                    },
+                    "result": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Server Internal error"
+          }
+        },
+        "tags": [
+          "System"
+        ]
+      }
+    }
+  }
+}

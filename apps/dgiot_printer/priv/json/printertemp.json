@@ -1,0 +1,689 @@
+{
+  "type": "page",
+  "konva": {
+    "Stage": {
+      "attrs": {
+        "width": 700,
+        "height": 700
+      },
+      "children": [
+        {
+          "attrs": {
+            "id": "Layer_Thing"
+          },
+          "children": [
+            {
+              "attrs": {
+                "x": 323,
+                "y": 84.95900920567532,
+                "id": "f9dddd0eeb_amisBMK8t",
+                "name": "amis",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true
+              },
+              "children": [],
+              "className": "Label"
+            },
+            {
+              "attrs": {
+                "x": 2,
+                "y": 1,
+                "id": "print_paper",
+                "fill": "",
+                "name": "printer",
+                "text": "",
+                "type": "paper",
+                "width": 408,
+                "height": 283,
+                "stroke": "black",
+                "opacity": 0.75,
+                "fontSize": 15,
+                "draggable": true,
+                "fontFamily": "宋体",
+                "lineHeight": 0,
+                "strokeWidth": 4
+              },
+              "className": "Rect"
+            },
+            {
+              "attrs": {
+                "x": 13,
+                "y": 14,
+                "id": "596569e7b3_textmKM3S",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "JEENUO",
+                "type": "label",
+                "width": 300,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 16,
+                "draggable": true,
+                "fontFamily": "Verdana",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 34,
+                "y": 39,
+                "id": "596569e7b3_textGh4pl",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "浙江保舒康新材料有限公司",
+                "type": "label",
+                "width": 300,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 16,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 10,
+                "y": 70,
+                "id": "596569e7b3_textizw15",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "单据编号:",
+                "type": "label",
+                "width": 80,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 200,
+                "y": 70,
+                "id": "596569e7b3_textrHEUk",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "班次:",
+                "type": "label",
+                "width": 300,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 10,
+                "y": 100,
+                "id": "596569e7b3_textJHhnI",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "品名:",
+                "type": "label",
+                "width": 300,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 200,
+                "y": 100,
+                "id": "596569e7b3_textHrVkX",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "生产卷号:",
+                "type": "label",
+                "width": 100,
+                "height": 12,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 10,
+                "y": 130,
+                "id": "596569e7b3_textWi91j",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "品检:",
+                "type": "label",
+                "width": 300,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 200,
+                "y": 130,
+                "id": "596569e7b3_textOJ5M0",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "日期:",
+                "type": "label",
+                "width": 100,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 10,
+                "y": 160,
+                "id": "596569e7b3_textOlIP1",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "长:",
+                "type": "label",
+                "width": 80,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 100,
+                "y": 160,
+                "id": "596569e7b3_textw1qYj",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "宽:",
+                "type": "label",
+                "width": 80,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 200,
+                "y": 160,
+                "id": "596569e7b3_textlZlCp",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "毛重:",
+                "type": "label",
+                "width": 100,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 10,
+                "y": 185,
+                "id": "596569e7b3_textogXlO",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "净重:",
+                "type": "label",
+                "width": 100,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 200,
+                "y": 185,
+                "id": "596569e7b3_textEG6ai",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "接头数:",
+                "type": "label",
+                "width": 100,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 9,
+                "y": 210,
+                "id": "596569e7b3_textaiToJ",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "去向:",
+                "type": "label",
+                "width": 300,
+                "height": 10,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 200,
+                "y": 210,
+                "id": "596569e7b3_textrAfjn",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "原因:",
+                "type": "label",
+                "width": 300,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 250,
+                "y": 70,
+                "id": "splunce_banci",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "A1",
+                "type": "value",
+                "width": 300,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 70,
+                "y": 100,
+                "id": "spunlace_spec",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "X6055W-T2170",
+                "type": "value",
+                "width": 140,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 280,
+                "y": 100,
+                "id": "spunlace_rollnum",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "A20221009A01",
+                "type": "value",
+                "width": 100,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 70,
+                "y": 130,
+                "id": "quality_people",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "张三",
+                "type": "value",
+                "width": 100,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 250,
+                "y": 130,
+                "id": "spunlace_date",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "2022-10-09",
+                "type": "value",
+                "width": 300,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 140,
+                "y": 160,
+                "id": "wide",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "20",
+                "type": "value",
+                "width": 60,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 53,
+                "y": 160,
+                "id": "long",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "18",
+                "type": "value",
+                "width": 40,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 250,
+                "y": 160,
+                "id": "spunlace_semisuttle",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "22",
+                "type": "value",
+                "width": 300,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 70,
+                "y": 185,
+                "id": "spunlace_fundsuttle",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "12",
+                "type": "value",
+                "width": 100,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 270,
+                "y": 185,
+                "id": "joint",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "12",
+                "type": "label",
+                "width": 100,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 60,
+                "y": 210,
+                "id": "quality_destination",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "成品仓库",
+                "type": "value",
+                "width": 100,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 250,
+                "y": 210,
+                "id": "quality_detail",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "合格",
+                "type": "label",
+                "width": 150,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 61,
+                "y": 270.00534412955466,
+                "id": "spunlace_id_barcode",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "1234567800jh",
+                "type": "scancodetext",
+                "align": 4,
+                "width": 150,
+                "format": 29,
+                "height": 50,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 90,
+                "y": 70,
+                "id": "splunce_orderid",
+                "fill": "rgba(0, 0, 0, 1)",
+                "name": "printer",
+                "text": "MO2208300009",
+                "type": "value",
+                "width": 100,
+                "height": 20,
+                "stroke": "",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "Calibri",
+                "lineHeight": 0,
+                "strokeWidth": 0.1
+              },
+              "className": "Text"
+            },
+            {
+              "attrs": {
+                "x": 25,
+                "y": 229,
+                "id": "spunlace_id",
+                "fill": "rgba(170, 234, 213, 1)",
+                "name": "printer",
+                "text": "1334456456h",
+                "type": "scancode",
+                "align": 4,
+                "width": 150,
+                "format": 27,
+                "height": 50,
+                "stroke": "black",
+                "opacity": 0.75,
+                "fontSize": 12,
+                "draggable": true,
+                "fontFamily": "宋体",
+                "strokeWidth": 4
+              },
+              "className": "Rect"
+            }
+          ],
+          "className": "Layer"
+        }
+      ],
+      "className": "Stage"
+    }
+  }
+}

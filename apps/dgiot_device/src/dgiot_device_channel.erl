@@ -20,6 +20,7 @@
 -include_lib("dgiot/include/dgiot_socket.hrl").
 -include_lib("dgiot/include/logger.hrl").
 -include_lib("dgiot_bridge/include/dgiot_bridge.hrl").
+-include("dgiot_device.hrl").
 -define(TYPE, <<"DEVICE">>).
 -define(MAX_BUFF_SIZE, 1024).
 -record(state, {id, mod, product, env = #{}}).
@@ -84,7 +85,7 @@
         order => 102,
         type => string,
         required => false,
-        default => <<"http://dgiot-1253666439.cos.ap-shanghai-fsi.myqcloud.com/shuwa_tech/zh/product/dgiot/channel/device_profile.png">>,
+        default => <<"/dgiot_file/shuwa_tech/zh/product/dgiot/channel/device_channel.png">>,
         title => #{
             en => <<"channel ICO">>,
             zh => <<"通道ICO"/utf8>>
@@ -101,16 +102,27 @@ start(ChannelId, ChannelArgs) ->
     dgiot_channelx:add(?TYPE, ChannelId, ?MODULE, ChannelArgs).
 
 %% 通道初始化
-init(?TYPE, ChannelId, Args) ->
+init(?TYPE, ChannelId, #{<<"offline">> := OffLine} = Args) ->
     State = #state{
         id = ChannelId,
         env = Args
     },
+    dgiot_data:insert({device, offline}, OffLine),
+    dgiot_parse_hook:subscribe(<<"Device">>, get, ChannelId),
+    dgiot_parse_hook:subscribe(<<"Device/*">>, get, ChannelId),
+    dgiot_parse_hook:subscribe(<<"Device">>, post, ChannelId),
+    dgiot_parse_hook:subscribe(<<"Device/*">>, put, ChannelId, [<<"isEnable">>, <<"ACL">>, <<"location">>]),
+    dgiot_parse_hook:subscribe(<<"Device/*">>, delete, ChannelId),
+    dgiot_parse_hook:subscribe(<<"Product">>, get, ChannelId),
+    dgiot_parse_hook:subscribe(<<"Product/*">>, get, ChannelId),
+    dgiot_parse_hook:subscribe(<<"Product">>, post, ChannelId),
+    dgiot_parse_hook:subscribe(<<"Product/*">>, put, ChannelId),
+    dgiot_parse_hook:subscribe(<<"Product/*">>, delete, ChannelId),
+    dgiot_parse_hook:subscribe(<<"Channel/*">>, delete, ChannelId),
     {ok, State, []}.
 
-handle_init(State) ->
-    erlang:send_after(300, self(), {message, <<"_Pool">>, load}),
-    erlang:send_after(3 * 60 * 1000, self(), {message, <<"_Pool">>, check}),
+handle_init(#state{env = #{<<"checktime">> := CheckTime}} = State) ->
+    erlang:send_after(CheckTime * 60 * 1000, self(), check),
     {ok, State}.
 
 %% 通道消息处理,注意：进程池调用
@@ -118,22 +130,172 @@ handle_event(_EventId, Event, State) ->
     ?LOG(info, "Channel ~p", [Event]),
     {ok, State}.
 
-handle_message(load, #state{env = #{<<"order">> := Order, <<"offline">>:= OffLine}} = State) ->
-    dgiot_data:insert({device, offline}, OffLine),
-    dgiot_device:load_device(Order),
-    dgiot_product:load(),
-    dgiot_parse:load_role(),
-    {ok, State};
-
-handle_message(check, #state{env = #{<<"offline">>:= OffLine, <<"checktime">>:= CheckTime}} = State) ->
-    erlang:send_after(CheckTime * 60 * 1000, self(), {message, <<"_Pool">>, check}),
+handle_message(check, #state{id = ChannelId, env = #{<<"offline">> := OffLine, <<"checktime">> := CheckTime}} = State) ->
+    dgiot_channelx:send_after(CheckTime * 60 * 1000, ChannelId, check),
     dgiot_device:sync_parse(OffLine),
     {ok, State};
 
-handle_message(_, State) ->
+handle_message({sync_parse, Pid, 'after', get, Token, <<"Device">>, #{<<"results">> := Results} = ResBody}, State) ->
+    SessionToken = dgiot_parse_auth:get_usersession(dgiot_utils:to_binary(Token)),
+    MapType = dgiot_utils:to_binary(application:get_env(dgiot_device, map_type, "baidu")),
+    {NewResults, DeviceList} =
+        lists:foldl(
+            fun(#{<<"objectId">> := DeviceId} = Device, {NewResult, Dev}) ->
+                NewLocation = dgiot_gps:fromwgs84(maps:get(<<"location">>, Device, #{}), MapType),
+                case dgiot_device:lookup(DeviceId) of
+                    {ok, #{<<"status">> := Status, <<"isEnable">> := IsEnable, <<"time">> := Time}} ->
+                        NewStatus =
+                            case Status of
+                                true ->
+                                    <<"ONLINE">>;
+                                _ ->
+                                    <<"OFFLINE">>
+                            end,
+                        {NewResult ++ [Device#{<<"location">> => NewLocation, <<"status">> => NewStatus, <<"isEnable">> => IsEnable, <<"lastOnlineTime">> => Time}], Dev ++ [DeviceId]};
+                    _ ->
+                        {NewResult ++ [Device#{<<"location">> => NewLocation}], Dev ++ [DeviceId]}
+                end
+            end, {[], []}, Results),
+    case SessionToken of
+        not_find ->
+            pass;
+        _ ->
+            Topics =
+                lists:foldl(fun(X, Acc) ->
+                    Topic = <<"$dg/user/devicestate/", X/binary, "/report">>,
+                    Acc ++ [Topic]
+                            end, [], DeviceList),
+            dgiot_mqtt:subscribe_route_key(Topics, <<"devicestate">>, SessionToken)
+    end,
+    dgiot_parse_hook:publish(Pid, ResBody#{<<"results">> => NewResults}),
+    {ok, State};
+
+handle_message({sync_parse, Pid, 'after', get, _Token, <<"Device">>, #{<<"objectId">> := DeviceId} = ResBody}, State) ->
+    MapType = dgiot_utils:to_binary(application:get_env(dgiot_device, map_type, "baidu")),
+    NewLocation = dgiot_gps:fromwgs84(maps:get(<<"location">>, ResBody, #{}), MapType),
+    ResBody1 =
+        case dgiot_device:lookup(DeviceId) of
+            {ok, #{<<"status">> := Status, <<"isEnable">> := IsEnable, <<"time">> := Time}} ->
+                NewStatus =
+                    case Status of
+                        true ->
+                            <<"ONLINE">>;
+                        _ ->
+                            <<"OFFLINE">>
+                    end,
+                ResBody#{<<"location">> => NewLocation, <<"status">> => NewStatus, <<"isEnable">> => IsEnable, <<"lastOnlineTime">> => Time};
+            _ ->
+                ResBody#{<<"location">> => NewLocation}
+        end,
+    dgiot_parse_hook:publish(Pid, ResBody1),
+    {ok, State};
+
+handle_message({sync_parse, _Pid, 'after', post, Token, <<"Device">>, QueryData}, State) ->
+    dgiot_device:post(QueryData, Token),
+    {ok, State};
+
+handle_message({sync_parse, _Pid, 'after', put, _Token, <<"Device">>, QueryData}, State) ->
+%%    io:format("~s ~p ~p  ~n", [?FILE, ?LINE, QueryData]),
+    dgiot_device:put(QueryData),
+    {ok, State};
+
+handle_message({sync_parse, _Pid, 'after', delete, _Token, <<"Device">>, ObjectId}, State) ->
+%%    io:format("~s ~p ~p ~p ~n", [?FILE, ?LINE, Pid, ObjectId]),
+    dgiot_device_hook:delete('after', ObjectId),
+    {ok, State};
+
+handle_message({sync_parse, Pid, 'after', get, Token, <<"Product">>, #{<<"results">> := _Results} = ResBody}, State) ->
+%%    io:format("~s ~p ~p ~p ~n", [?FILE, ?LINE, Pid,Header]),
+    Key = dgiot_device_static:get_count(Token),
+    timer:sleep(100),
+    NewResBody = dgiot_device_static:stats(ResBody, Key),
+    dgiot_parse_hook:publish(Pid, NewResBody),
+    {ok, State};
+
+handle_message({sync_parse, Pid, 'after', get, Token, <<"Product">>, #{<<"objectId">> := _ObjectId} = ResBody}, State) ->
+%%    io:format("~s ~p ~p ~p ~n", [?FILE, ?LINE, Pid, ObjectId]),
+    Key = dgiot_device_static:get_count(Token),
+%%    io:format("~s ~p ~p  ~n", [?FILE, ?LINE, Key]),
+    timer:sleep(100),
+    NewResBody = dgiot_device_static:stats(ResBody, Key),
+%%    io:format("~s ~p ~p ~p ~n", [?FILE, ?LINE, Pid,NewResBody]),
+    dgiot_parse_hook:publish(Pid, NewResBody),
+    {ok, State};
+
+handle_message({sync_parse, _Pid, 'after', post, _Token, <<"Product">>, QueryData}, State) ->
+%%    io:format("~s ~p ~p ~p ~n", [?FILE, ?LINE, Pid, QueryData]),
+    dgiot_product_hook:post('after', QueryData),
+    dgiot_product:save(QueryData),
+    timer:sleep(100),
+    ProductId = maps:get(<<"objectId">>, QueryData),
+    dgiot_product_channel:do_td_message(ProductId),
+    dgiot_product_knova:save_Product_konva(ProductId),
+    {ok, State};
+
+handle_message({sync_parse, _Pid, 'after', put, _Token, <<"Product">>, QueryData}, State) ->
+%%    io:format("~s ~p ~p ~p ~n", [?FILE, ?LINE, Pid, QueryData]),
+    dgiot_product_hook:put('after', QueryData),
+    dgiot_product:put(QueryData),
+    timer:sleep(100),
+    ProductId = maps:get(<<"objectId">>, QueryData),
+    dgiot_product_channel:do_td_message(ProductId),
+    dgiot_product_knova:save_Product_konva(ProductId),
+    dgiot_product:hook_topic(QueryData),
+    {ok, State};
+
+handle_message({sync_parse, _Pid, 'after', delete, _Token, <<"Product">>, ObjectId}, State) ->
+%%    io:format("~s ~p ~p ~p ~n", [?FILE, ?LINE, Pid, ObjectId]),
+    dgiot_product_hook:delete('after', ObjectId),
+    dgiot_product:delete(ObjectId),
+    {ok, State};
+
+handle_message({sync_parse, Pid, 'before', post, Token, <<"Device">>, #{<<"location">> := Location} = QueryData}, State) ->
+    SessionToken = dgiot_parse_auth:get_usersession(dgiot_utils:to_binary(Token)),
+    Cookie = case dgiot_parse_auth:get_cookie(SessionToken) of
+                 not_find ->
+                     #{};
+                 A ->
+                     A
+             end,
+    MapType = maps:get(<<"mapType">>, Cookie, <<"baidu">>),
+    NewLocation = dgiot_gps:towgs84(Location, MapType),
+    NewQueryData = QueryData#{<<"location">> => NewLocation},
+    dgiot_device:put(NewQueryData),
+    dgiot_parse_hook:publish(Pid, NewQueryData),
+    {ok, State};
+
+handle_message({sync_parse, Pid, 'before', put, Token, <<"Device">>, #{<<"location">> := Location} = QueryData}, State) ->
+    SessionToken = dgiot_parse_auth:get_usersession(dgiot_utils:to_binary(Token)),
+    Cookie = case dgiot_parse_auth:get_cookie(SessionToken) of
+                 not_find ->
+                     #{};
+                 A ->
+                     A
+             end,
+    MapType = maps:get(<<"mapType">>, Cookie, <<"baidu">>),
+    NewLocation = dgiot_gps:towgs84(Location, MapType),
+    NewQueryData = QueryData#{<<"location">> => NewLocation},
+    dgiot_parse_hook:publish(Pid, NewQueryData),
+    {ok, State};
+
+handle_message({sync_parse, _Pid, 'before', delete, _Token, <<"Channel">>, ObjectId}, State) ->
+%%    io:format("~s ~p ~p ~n", [?FILE, ?LINE, ObjectId]),
+    case dgiot_parsex:get_object(<<"Channel">>, ObjectId) of
+        {ok, #{<<"isEnable">> := true}} ->
+            dgiot_bridge:control_channel(#{<<"id">> => ObjectId, <<"action">> => <<"disable">>}, <<>>);
+        _ -> pass
+    end,
+    {ok, State};
+
+handle_message({update_schemas_json}, State) ->
+%%    更新表字段
+    dgiot_parse_utils:update_schemas_json(),
+    {ok, State};
+
+handle_message(Message, State) ->
+    ?LOG(debug, "channel ~p", [Message]),
     {ok, State}.
 
 stop(ChannelType, ChannelId, _State) ->
     ?LOG(warning, "Channel[~p,~p] stop", [ChannelType, ChannelId]),
     ok.
-

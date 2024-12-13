@@ -1,14 +1,14 @@
 {application, dgiot_location,
     [{description, "DGIOT LOCATION"},
         {vsn, "4.3.0"},
-        {registered, []},
+        {registered, [dgiot_location_sup]},
         {mod, {dgiot_location_app, []}},
-        {applications, [kernel, stdlib]},
+        {applications, [kernel, stdlib, locus]},
         {env, []},
         {modules, []},
         {licenses, ["Apache-2.0"]},
         {maintainers, ["DGIOT Team"]},
-        {links, [{"Homepage", "https://www.iotn2n.com/"},
+        {links, [{"Homepage", "https://www.dgiotcloud.cn/"},
             {"Github", "https://github.com/dgiot/dgiot"}
         ]}
     ]

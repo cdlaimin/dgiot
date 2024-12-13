@@ -29,44 +29,45 @@
 %%% API
 %%%===================================================================
 
-start_link(#{<<"sessionToken">> := SessionToken} = State) ->
-    case dgiot_data:lookup({dashboard, SessionToken}) of
+start_link(#{<<"dashboardId">> := DashboardId, <<"sessionToken">> := SessionToken} = State) ->
+    case dgiot_data:lookup({dashboard, DashboardId, SessionToken}) of
         {ok, Pid} when is_pid(Pid) ->
             case is_process_alive(Pid) of
                 true ->
-                    ok;
+                    gen_server:call(Pid, stop, 5000),
+                    erlang:garbage_collect(Pid);
                 false ->
-                    gen_server:start_link(?MODULE, [State], [])
+                    pass
             end;
         _Reason ->
-            gen_server:start_link(?MODULE, [State], [])
-    end;
+            pass
+    end,
+    gen_server:start_link(?MODULE, [State], []);
 
-
-start_link(State) ->
-    ?LOG(info, "State ~p", [State]),
+start_link(_State) ->
     ok.
 
-stop(#{<<"sessionToken">> := SessionToken}) ->
-    case dgiot_data:lookup({dashboard, SessionToken}) of
+stop(#{<<"dashboardId">> := DashboardId, <<"sessionToken">> := SessionToken}) ->
+    case dgiot_data:lookup({dashboard, DashboardId, SessionToken}) of
         {ok, Pid} when is_pid(Pid) ->
             is_process_alive(Pid) andalso gen_server:call(Pid, stop, 5000);
         _Reason ->
             ok
     end.
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
-init([#{<<"data">> := Que, <<"sessionToken">> := SessionToken}]) ->
-    dgiot_data:insert({dashboard, SessionToken}, self()),
+init([#{<<"dashboardId">> := DashboardId, <<"sessionToken">> := SessionToken}]) ->
+    dgiot_data:insert({dashboard, DashboardId, SessionToken}, self()),
+    dgiot_mqtt:subscribe(<<"dashboard_ack/", SessionToken/binary>>),
+    dgiot_data:delete({dashboard_heart, SessionToken}),
+    Que = dgiot_topo:get_que(DashboardId),
     case length(Que) of
         0 ->
-            erlang:send_after(300, self(), stop);
+            erlang:send_after(3000, self(), stop);
         _ ->
-            Topic = <<"dashboard/", SessionToken/binary, "/heart">>,
-            dgiot_mqtt:subscribe(Topic),
-            erlang:send_after(30 * 1000, self(), heart),
-            erlang:send_after(100, self(), retry)
+            erlang:send_after(1000, self(), topo)
     end,
     {ok, #task{oldque = Que, newque = Que, freq = 1, sessiontoken = SessionToken}};
 
@@ -88,25 +89,31 @@ handle_info({'EXIT', _From, Reason}, State) ->
     {stop, Reason, State};
 
 %% 任务结束
-handle_info(retry, #task{newque = Que} = State) when length(Que) == 0 ->
+handle_info(dashboard, #task{newque = Que} = State) when length(Que) == 0 ->
     erlang:garbage_collect(self()),
     {stop, normal, State};
 
-%% 定时触发抄表指令
-handle_info(retry, State) ->
-    {noreply, send_msg(State)};
-
-%% 定时触发抄表指令
-handle_info(heart, #task{heart = Heart} = State) when Heart < 4 ->
-    erlang:send_after(30 * 1000, self(), heart),
-    {noreply, State#task{heart = Heart + 1}};
-
-%% 定时触发抄表指令
-handle_info(heart, State) ->
-    {stop, normal, State};
+handle_info(dashboard, State) ->
+    {noreply, send_dashboard(State)};
 
 %% 任务结束
-handle_info({deliver, _, _Msg}, State) ->
+handle_info(topo, #task{newque = Que} = State) when length(Que) == 0 ->
+    erlang:garbage_collect(self()),
+    {stop, normal, State};
+
+handle_info(topo, State) ->
+    {noreply, send_topo(State)};
+
+%%
+handle_info({deliver, _, Msg}, State) ->
+    Topic = dgiot_mqtt:get_topic(Msg),
+    case Topic of
+        <<"dashboard_ack/", SessionToken:34/binary>> ->
+%%            io:format("~s ~p SessionToken = ~p. ~p~n ~n", [?FILE, ?LINE, SessionToken, dgiot_datetime:now_secs()]),
+            dgiot_data:insert({dashboard_heart, SessionToken}, dgiot_datetime:now_secs());
+        _ ->
+            pass
+    end,
     {noreply, State#task{heart = 0}};
 
 handle_info(_Msg, State) ->
@@ -118,12 +125,24 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-send_msg(#task{newque = Que} = State) ->
+send_dashboard(#task{newque = Que} = State) ->
     Task = lists:nth(1, Que),
     dgiot_dashboard:do_task(Task, State),
     NewQue = lists:nthtail(1, Que),
-    erlang:send_after(300, self(), retry),
+    erlang:send_after(10 * 1000, self(), dashboard),
     State#task{newque = NewQue}.
 
-
-
+send_topo(#task{newque = Que, sessiontoken = SessionToken} = State) ->
+    Now = dgiot_datetime:now_secs(),
+    Task = lists:nth(1, Que),
+    dgiot_topo:send_topo(Task, SessionToken),
+    NewQue = lists:nthtail(1, Que) ++ [Task],
+    erlang:send_after(10 * 1000, self(), topo),
+%%    ets:lookup(emqx_channel, SessionToken)
+    case dgiot_data:get({dashboard_heart, SessionToken}) of
+        Oldtime when Now - Oldtime > 30 ->
+%%            停止任务
+            State#task{newque = []};
+        _ ->
+            State#task{newque = NewQue}
+    end.

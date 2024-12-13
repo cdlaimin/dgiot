@@ -82,7 +82,7 @@ handle(OperationID, Args, Context, Req) ->
 %% 请求:POST /iotapi/upload
 do_request(post_upload, #{<<"file">> := FileInfo}, #{<<"user">> := #{<<"objectId">> := UserId}}, _Req) ->
     ?LOG(info, "FileInfo ~p", [FileInfo]),
-    Key = dgiot_license:to_md5(jsx:encode(FileInfo#{node => node()})),
+    Key = dgiot_utils:to_md5(dgiot_json:encode(FileInfo#{node => node()})),
     case dgiot_parse:create_object(<<"Dict">>, #{
         <<"ACL">> => #{UserId => #{<<"read">> => true, <<"write">> => true}},
         <<"type">> => <<"file">>,
@@ -95,56 +95,33 @@ do_request(post_upload, #{<<"file">> := FileInfo}, #{<<"user">> := #{<<"objectId
             {error, Reason}
     end;
 
-%% System 概要: 发送短信验证码 描述:发送短信,短信验证码发送成功后,则会在缓存中写入action + mobile, 用户下一步提交时，可以根据此键查询验证通过
-%% OperationId:post_sendsms_action
-%% 请求:POST /iotapi/sendsms/:Action
-do_request(post_sendsms, #{<<"account">> := Account, <<"nationcode">> := NationCode}, _Context, _Req) ->
-    case dgiot_notification:send_verification_code(NationCode, Account) of
-        {error, Reason} ->
-            {500, #{code => 1, error => Reason}};
-        {ok, Map} ->
-            {ok, Map}
-    end;
-
-%% System 概要: 验证手机号/邮箱是否通过 描述:验证手机号/邮箱是否通过
-%% OperationId:post_verify_code
-%% 请求:POST /iotapi/verify_code
-do_request(post_verify_code_action, #{<<"account">> := Account, <<"code">> := Code} = Args, _Context, Req) ->
-    case dgiot_notification:check_verification_code(Account, Code) of
-        true ->
-            dgiot_verify_code:handle(Args, Req);
-        false ->
-            {400, unicode:characters_to_binary(<<"验证码未通过！"/utf8>>)}
-    end;
-
 do_request(post_upload_token, #{<<"from">> := <<"fastdfs">>}, _Context, Req0) ->
     {ok, Body, _Req1} = dgiot_req:read_body(Req0),
     case jsx:decode(Body, [{labels, binary}, return_maps]) of
-        #{<<"path">> := Path, <<"auth_token">> := AuthToken} = Info ->
+        #{<<"auth_token">> := AuthToken} = Info ->
             case dgiot_auth:get_session(AuthToken) of
                 #{<<"roles">> := Role} = User ->
-                    case maps:values(Role) of
-                        [#{<<"name">> := Path} | _] -> {200, <<"ok">>};
+                    case User of
+                        #{<<"objectId">> := UserId} ->
+                            case dgiot_parse_auth:get_role(UserId, AuthToken) of
+                                {ok, _Result} ->
+                                    sync_files(Info, Role, AuthToken),
+                                    {200, <<"ok">>};
+                                _ -> {200, <<"fail">>}
+                            end;
                         _ ->
-                            case User of
-                                #{<<"objectId">> := UserId} ->
-                                    case dgiot_parse:get_role(UserId, AuthToken) of
-                                        {ok, _Result} -> {200, <<"ok">>};
-                                        _ -> {200, <<"fail">>}
-                                    end;
-                                _ ->
-                                    ?LOG(warning, "post_upload_token No Login ~p", [Info]),
-                                    {200, <<"fail">>}
-                            end
+                            ?LOG(warning, "post_upload_token No Login ~p", [Info]),
+                            {200, <<"fail">>}
                     end
             end;
         _ ->
             case _Req1 of
                 #{body := Body1} ->
                     case jsx:decode(Body1, [{labels, binary}, return_maps]) of
-                        #{<<"auth_token">> := AuthToken} ->
+                        #{<<"auth_token">> := AuthToken} = Info ->
                             case dgiot_auth:get_session(AuthToken) of
-                                #{<<"roles">> := _Role} = _User ->
+                                #{<<"roles">> := Role} = _User ->
+                                    sync_files(Info, Role, AuthToken),
                                     {200, <<"ok">>};
                                 _ ->
                                     {200, <<"fail">>}
@@ -155,115 +132,35 @@ do_request(post_upload_token, #{<<"from">> := <<"fastdfs">>}, _Context, Req0) ->
             end
     end;
 
-do_request(post_graphql, Body, #{<<"sessionToken">> := SessionToken} = _Context, _Req0) ->
-    case dgiot_parse:graphql(Body#{<<"access_token">> => SessionToken}) of
-        {ok, Result} ->
-            {200, Result};
-        Other -> Other
-    end;
 
+%% Thing 概要: 导库 描述:查询物模型
+%% OperationId:get_thing
+%% 请求:GET /iotapi/get_thing
+do_request(get_thing, #{<<"productid">> := ProductId, <<"moduleType">> := ModuleType},
+    #{<<"sessionToken">> := SessionToken} = _Context, _Req) ->
+    getThing(ProductId, ModuleType, SessionToken);
 
 %% Thing 概要: 导库 描述:添加物模型
 %% OperationId:post_thing
 %% 请求:PUT /iotapi/post_thing
 do_request(post_thing, #{<<"productid">> := ProductId, <<"item">> := Item} = _Body,
     #{<<"sessionToken">> := SessionToken} = _Context, _Req) ->
-    #{<<"identifier">> := Identifier} = Item,
-    case dgiot_parse:get_object(<<"Product">>, ProductId, [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
-        {ok, #{<<"thing">> := Thing}} ->
-            Properties = maps:get(<<"properties">>, Thing, []),
-            {Ids, NewProperties} =
-                lists:foldl(fun(X, {Ids1, Acc}) ->
-                    case X of
-                        #{<<"identifier">> := Identifier} ->
-                            {Ids1 ++ [Identifier], Acc};
-                        _ ->
-                            {Ids1, Acc ++ [X]}
-                    end
-                            end, {[], [Item]}, Properties),
-            case length(Ids) == 0 of
-                true ->
-                    {_, R} = dgiot_parse:update_object(<<"Product">>, ProductId,
-                        #{<<"thing">> => Thing#{<<"properties">> => NewProperties}},
-                        [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]),
-                    {ok, R#{<<"code">> => 200}};
-                false ->
-                    {ok, #{<<"code">> => 204, <<"msg">> => <<Identifier/binary, " already existed">>}}
-            end;
-        Error ->
-            {error, Error}
-    end;
-
+    postThing(ProductId, Item, SessionToken);
 
 %% Thing 概要: 导库 描述:修改物模型
 %% OperationId:put_thing
 %% 请求:PUT /iotapi/put_thing
 do_request(put_thing, #{<<"productid">> := ProductId, <<"item">> := Item} = _Body,
     #{<<"sessionToken">> := SessionToken} = _Context, _Req) ->
-    #{<<"identifier">> := Identifier} = Item,
-    case dgiot_parse:get_object(<<"Product">>, ProductId, [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
-        {ok, #{<<"thing">> := Thing}} ->
-            #{<<"properties">> := Properties} = Thing,
-            NewProperties =
-                lists:foldl(fun(X, Acc) ->
-                    case X of
-                        #{<<"identifier">> := Identifier} ->
-                            Acc ++ [Item];
-                        _ ->
-                            Acc ++ [X]
-                    end
-                            end, [], Properties),
-            {_, R} = dgiot_parse:update_object(<<"Product">>, ProductId,
-                #{<<"thing">> => Thing#{<<"properties">> => NewProperties}},
-                [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]),
-            {ok, R#{<<"code">> => 200}};
-        Error ->
-            {error, Error}
-    end;
+    putTing(ProductId, Item, SessionToken);
+
 
 %% Thing 概要: 导库 描述:删除物模型
 %% OperationId:put_thing
 %% 请求:PUT /iotapi/put_thing
 do_request(delete_thing, #{<<"productid">> := ProductId, <<"item">> := Item} = _Body,
     #{<<"sessionToken">> := SessionToken} = _Context, _Req) ->
-    #{<<"identifier">> := Identifier} = Item,
-    case dgiot_parse:get_object(<<"Product">>, ProductId, [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
-        {ok, #{<<"thing">> := Thing}} ->
-            #{<<"properties">> := Properties} = Thing,
-            {Ids, NewProperties} =
-                lists:foldl(fun(X, {Ids1, Acc}) ->
-                    case X of
-                        #{<<"identifier">> := Identifier} ->
-                            {Ids1, Acc};
-                        #{<<"identifier">> := Identifier1, <<"dataForm">> := #{<<"collection">> := Collection}} ->
-                            case binary:match(Collection, [Identifier]) of
-                                nomatch ->
-                                    {Ids1, Acc ++ [X]};
-                                _ ->
-                                    case Ids1 of
-                                        [] ->
-                                            {Ids1 ++ [Identifier1], Acc};
-                                        _ ->
-                                            {Ids1 ++ [<<",", Identifier1/binary>>], Acc}
-                                    end
-                            end;
-                        _ ->
-                            {Ids1, Acc}
-                    end
-                            end, {[], []}, Properties),
-            case length(Ids) == 0 of
-                true ->
-                    {_, R} = dgiot_parse:update_object(<<"Product">>, ProductId,
-                        #{<<"thing">> => Thing#{<<"properties">> => NewProperties}},
-                        [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]),
-                    {ok, R#{<<"code">> => 200}};
-                false ->
-                    BinIds = dgiot_utils:to_binary(Ids),
-                    {ok, #{<<"code">> => 204, <<"msg">> => <<BinIds/binary, " use ", Identifier/binary>>}}
-            end;
-        Error ->
-            {error, Error}
-    end;
+    deleteThing(ProductId, SessionToken, Item);
 
 
 %% Product 概要: 导库 描述:json文件导库
@@ -293,11 +190,11 @@ do_request(post_device, Body, #{<<"sessionToken">> := SessionToken} = _Context, 
 %% OperationId:post_adddevice
 %% 请求:POST /iotapi/post_adddevice
 do_request(post_adddevice, #{<<"devaddr">> := Devaddr, <<"productid">> := ProductId, <<"longitude">> := Longitude, <<"latitude">> := Latitude}, #{<<"sessionToken">> := SessionToken} = _Context, _Req) ->
-    DeviceId = dgiot_parse:get_deviceid(ProductId, Devaddr),
+    DeviceId = dgiot_parse_id:get_deviceid(ProductId, Devaddr),
     case dgiot_auth:get_session(SessionToken) of
         #{<<"objectId">> := UserId} ->
             Acl =
-                case dgiot_parse:get_roleids(UserId) of
+                case dgiot_parse_id:get_roleids(UserId) of
                     [RoleId | _] ->
                         case dgiot_parse:get_object(<<"_Role">>, RoleId) of
                             {error, _} ->
@@ -356,7 +253,7 @@ do_request(get_product, #{<<"name">> := Name}, #{<<"sessionToken">> := SessionTo
 %% OperationId:post_product
 %% 请求:POST /iotapi/post_product
 do_request(post_hash_class, #{<<"class">> := Class} = Body, #{<<"sessionToken">> := _SessionToken} = _Context, _Req) ->
-    {ok, dgiot_parse:get_objectid(Class, Body)};
+    {ok, dgiot_parse_id:get_objectid(Class, Body)};
 
 %% 档案 概要: 导库 描述:json文件导库
 %% OperationId:post_product
@@ -375,6 +272,19 @@ do_request(post_export_data, #{<<"classname">> := Name} = Body, #{<<"sessionToke
         Err ->
             Err
     end;
+
+%% 导入物模型
+do_request(post_import_wmxdata, #{<<"type">> := Type, <<"objectId">> := ProductId, <<"file">> := File} = _Args, _Context, _Req) ->
+%%    io:format("~s ~p Args =~p.~n", [?FILE, ?LINE, Args]),
+    AtomName = dgiot_csv:save_csv_ets(File),
+    case dgiot_csv:post_properties(Type, AtomName) of
+        error ->
+            {ok, #{<<"code">> => 500, <<"msg">> => <<"error">>}};
+        Properties ->
+            dgiot_parse:update_object(<<"Product">>, ProductId, #{<<"thing">> => #{<<"properties">> => Properties}}),
+            {ok, #{<<"code">> => 200, <<"msg">> => <<"success">>}}
+    end;
+
 
 %% DB 概要: 导库 描述:json文件导库
 %% OperationId:post_import_data
@@ -485,6 +395,24 @@ do_request(post_menu, #{<<"file">> := FileInfo} = _Body,
 %% Relation 概要: 增加关系 描述:json文件导库
 %% OperationId:post_relation
 %% 请求:POST /iotapi/relation
+do_request(post_relation, #{<<"destClass">> := <<"_Role">>, <<"destId">> := DestId, <<"destField">> := <<"views">>,
+    <<"srcClass">> := SrcClass, <<"srcId">> := SrcId} = _Body, _Context, _Req) ->
+    Map = #{
+        <<"views">> => #{
+            <<"__op">> => <<"AddRelation">>,
+            <<"objects">> => [
+                #{
+                    <<"__type">> => <<"Pointer">>,
+                    <<"className">> => SrcClass,
+                    <<"objectId">> => SrcId
+                }
+            ]
+        }
+    },
+    R = dgiot_parse:update_object(<<"_Role">>, DestId, Map),
+    dgiot_role:save_role_view(DestId),
+    R;
+
 do_request(post_relation, #{<<"destClass">> := DestClass, <<"destId">> := DestId, <<"destField">> := DestField,
     <<"srcClass">> := SrcClass, <<"srcId">> := SrcId} = _Body, _Context, _Req) ->
     Map =
@@ -502,9 +430,48 @@ do_request(post_relation, #{<<"destClass">> := DestClass, <<"destId">> := DestId
         },
     dgiot_parse:update_object(DestClass, DestId, Map);
 
-%% Relation 概要: 删除关系 描述:json文件导库
+%% Relation 概要: 查询关系
+%% OperationId:get_relation
+%% 请求:get /iotapi/relation
+do_request(get_relation, #{<<"destClass">> := DestClass, <<"destId">> := DestId, <<"destField">> := DestField, <<"srcClass">> := SrcClass} = _Args, _Context, _Req) ->
+    Where = #{
+        <<"where">> => #{
+            <<"$relatedTo">> => #{
+                <<"object">> => #{
+                    <<"__type">> => <<"Pointer">>,
+                    <<"className">> => DestClass,
+                    <<"objectId">> => DestId
+                },
+                <<"key">> => DestField
+            }
+        },
+        <<"order">> => <<"-updatedAt">>,
+        <<"count">> => 1
+    },
+    dgiot_parse:query_object(SrcClass, Where);
+
+%% Relation 概要: 删除关系
 %% OperationId:post_relation
 %% 请求:DELETE /iotapi/relation
+do_request(delete_relation, #{<<"destClass">> := DestClass, <<"destId">> := DestId, <<"destField">> := <<"views">>,
+    <<"srcClass">> := SrcClass, <<"srcId">> := SrcId} = _Body, _Context, _Req) ->
+    Map =
+        #{<<"views">> =>
+        #{
+            <<"__op">> => <<"RemoveRelation">>,
+            <<"objects">> => [
+                #{
+                    <<"__type">> => <<"Pointer">>,
+                    <<"className">> => SrcClass,
+                    <<"objectId">> => SrcId
+                }
+            ]
+        }
+        },
+    R = dgiot_parse:update_object(DestClass, DestId, Map),
+    dgiot_role:save_role_view(DestId),
+    R;
+
 do_request(delete_relation, #{<<"destClass">> := DestClass, <<"destId">> := DestId, <<"destField">> := DestField,
     <<"srcClass">> := SrcClass, <<"srcId">> := SrcId} = _Body, _Context, _Req) ->
     Map =
@@ -522,11 +489,75 @@ do_request(delete_relation, #{<<"destClass">> := DestClass, <<"destId">> := Dest
         },
     dgiot_parse:update_object(DestClass, DestId, Map);
 
-%% Product 概要: 导库 描述:json文件导库
-%% OperationId:post_tree
-%% 请求:POST /iotapi/post_tree
-do_request(post_tree, #{<<"class">> := Class, <<"parent">> := Parent, <<"filter">> := Filter}, #{<<"sessionToken">> := SessionToken} = _Context, _Req0) ->
-    dgiot_parse_handler:get_classtree(Class, Parent, jsx:decode(Filter, [{labels, binary}, return_maps]), SessionToken);
+%% group 概要: 描述:获取产品树
+%% OperationId:get_producttree
+%% 请求:get /iotapi/get_producttree
+do_request(get_producttree, _, _Context, _Req) ->
+    Data =
+        case dgiot_parse:query_object(<<"Product">>, #{<<"keys">> => [<<"name">>, <<"category">>]}) of
+            {ok, #{<<"results">> := Result}} ->
+                lists:foldl(fun
+                                (#{<<"category">> := #{<<"objectId">> := CategoryId}}, Acc) ->
+                                    CategoryIds =
+                                        lists:foldl(fun
+                                                        (#{<<"name">> := Name, <<"objectId">> := ObjectId, <<"category">> := #{<<"objectId">> := CategoryId1}}, Acc1) when CategoryId1 == CategoryId ->
+                                                            Acc1 ++ [#{<<"label">> => Name, <<"value">> => ObjectId}];
+                                                        (_, Acc1) ->
+                                                            Acc1
+                                                    end, [], Result),
+                                    Acc#{CategoryId => CategoryIds};
+                                (_, Acc) ->
+                                    Acc
+                            end, #{}, Result);
+            _ ->
+                #{}
+        end,
+    case dgiot_parse:query_object(<<"Category">>, #{<<"where">> => #{<<"level">> => #{<<"$gt">> => 1}}, <<"keys">> => [<<"parent">>, <<"name">>, <<"level">>, <<"createdAt">>]}) of
+        {ok, #{<<"results">> := Classes}} when length(Classes) > 0 ->
+            NewClasses =
+                lists:foldl(fun(Class, Acc) ->
+                    NewClasse = Class#{
+                        <<"label">> => maps:get(<<"name">>, Class, <<"label">>),
+                        <<"value">> => maps:get(<<"objectId">>, Class, <<>>),
+                        <<"parent">> => maps:get(<<"parent">>, Class, <<"0">>)},
+                    Acc ++ [maps:without([<<"createdAt">>, <<"updatedAt">>, <<"ACL">>], NewClasse)]
+                            end, [], Classes),
+            ClassTree = dgiot_parse_utils:create_tree(NewClasses, <<"parent">>),
+            lists:foldl(fun(X, Acc1) ->
+                case X of
+                    #{<<"objectId">> := <<"de2ae39f47">>, <<"children">> := Children} ->
+                        Acc1 ++ Children;
+                    _ ->
+                        Acc1
+                end
+                        end, [], dgiot_parse_utils:create_tree(NewClasses, <<"parent">>)),
+            CategoryTree = set_children(ClassTree, Data),
+            {200, #{<<"producttree">> => CategoryTree}};
+        _ ->
+            {200, #{<<"producttree">> => []}}
+    end;
+
+%% iot_hub 概要: 导入导出整站数据
+%% OperationId:post_station_data
+%% 请求:POST /iotapi/post_station_data
+do_request(post_station_data, Args, #{<<"sessionToken">> := SessionToken} = _Context, _Req) ->
+    NewArgs = Args#{<<"sessionToken">> => SessionToken},
+    dgiot_mqtt:publish(SessionToken, <<"data_task/station_data">>, dgiot_json:encode(NewArgs)),
+    {200, #{}};
+
+%% iot_hub 概要: 设备调试接口
+%% OperationId:post_device_debug
+%% 请求:POST /iotapi/post_device_debug
+do_request(post_device_debug, #{<<"deviceid">> := DeviceId, <<"messagetype">> := Messagetype, <<"data">> := Data} = _Args, _Context, _Req) ->
+    case dgiot_parsex:get_object(<<"Device">>, DeviceId) of
+        {ok, #{<<"devaddr">> := Devaddr, <<"product">> := #{<<"objectId">> := ProductId}}} ->
+            ProfileTopic = <<"$dg/device/", ProductId/binary, "/", Devaddr/binary, "/debug">>,
+            NewData = dgiot_edge:get_writeData(Messagetype, Data),
+            dgiot_mqtt:publish(DeviceId, ProfileTopic, NewData),
+            {200, #{<<"status">> => 0, <<"data">> => #{<<"topic">> => ProfileTopic}}};
+        _ ->
+            {200, #{<<"status">> => <<"error">>, <<"msg">> => <<"not find device">>}}
+    end;
 
 %%  服务器不支持的API接口
 do_request(_OperationId, _Args, _Context, _Req) ->
@@ -540,7 +571,7 @@ get_class(Name, Filter, FileName, SessionToken) ->
             NewData = lists:foldl(fun(X, Acc) ->
                 Acc ++ [maps:without([<<"createdAt">>, <<"updatedAt">>, <<"children">>], X)]
                                   end, [], Data),
-            BinFile = unicode:characters_to_binary(jsx:encode(NewData)),
+            BinFile = unicode:characters_to_binary(dgiot_json:encode(NewData)),
             case zip:create(FileName, [{"data.json", BinFile}], [memory]) of
                 {ok, {_ZipFile, Bin}} ->
                     {ok, Bin};
@@ -554,7 +585,7 @@ get_product(Name, FileName, SessionToken) ->
     case dgiot_parse:query_object(<<"Product">>, #{<<"where">> => #{<<"name">> => Name}},
         [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
         {ok, #{<<"results">> := [Product]}} ->
-            BinFile = unicode:characters_to_binary(jsx:encode(Product)),
+            BinFile = unicode:characters_to_binary(dgiot_json:encode(Product)),
             case zip:create(FileName, [{"product.json", BinFile}], [memory]) of
                 {ok, {_ZipFile, Bin}} ->
                     {ok, Bin};
@@ -637,69 +668,185 @@ get_json_from_zip(FileInfo) ->
             {error, Reason}
     end.
 
-%%get_tddata(Channel, Acc, #{<<"objectId">> := DeviceId} = Device, #{<<"objectId">> := ProdcutId} = Product, DevAddr) ->
-%%    [Time, Data] =
-%%        case maps:get(<<"thing">>, Product, #{}) of
-%%            #{<<"properties">> := Properties} when length(Properties) > 0 ->
-%%                case dgiot_tdengine:get_device(Channel, ProdcutId, DeviceId, DeviceId, #{<<"keys">> => <<"last_row(*)">>, <<"limit">> => 1}) of
-%%                    {ok, #{<<"results">> := [Data1 | _]}} ->
-%%%%                        ?LOG(info,"Data1 ~p",[Data1]),
-%%                        [dgiot_tdengine:to_unixtime(maps:get(<<"createdat">>, Data1)), Data1];
-%%                    _ -> [0, #{}]
-%%                end;
-%%            _ ->
-%%                [0, #{}]
-%%        end,
-%%    TdData =
-%%        lists:foldl(fun(Y, Acc2) ->
-%%            #{
-%%                <<"objectId">> := SubDeviceId,
-%%                <<"devaddr">> := SubDtuAddr,
-%%                <<"product">> := #{<<"objectId">> := SubProductId}
-%%            } = Y,
-%%            case dgiot_tdengine:get_device(Channel, SubProductId, SubDeviceId, SubDtuAddr, #{<<"keys">> => <<"last_row(*)">>, <<"limit">> => 1}) of
-%%                {ok, #{<<"results">> := [Data2 | _]}} ->
-%%                    Acc2#{SubDeviceId => #{<<"productid">> => SubProductId, <<"deviceid">> => SubDeviceId, <<"data">> => maps:without([<<"createdat">>], Data2)}};
-%%                _ -> Acc2
-%%            end
-%%                    end, #{DeviceId => #{<<"productid">> => ProdcutId, <<"deviceid">> => DeviceId, <<"data">> => maps:without([<<"createdat">>], Data)}},
-%%            dgiot_device:get_sub_device(DevAddr)),
-%%    Topo =
-%%        case maps:find(<<"config">>, Product) of
-%%            error -> #{};
-%%            {ok, #{<<"components">> := Components}} ->
-%%                lists:foldl(fun(X, Acc3) ->
-%%                    case X of
-%%                        #{<<"identifier">> := Identifier, <<"type">> := Type, <<"wumoxing">> := #{<<"identifier">> := Di, <<"subdevid">> := Subdevid2}} ->
-%%                            case maps:get(Subdevid2, TdData, null) of
-%%                                null -> Acc3;
-%%                                #{<<"data">> := SubData} ->
-%%                                    case maps:get(Di, SubData, null) of
-%%                                        null -> Acc3;
-%%                                        Value ->
-%%                                            case Type of
-%%                                                <<"video">> ->
-%%                                                    Acc3#{Identifier => SubData};
-%%                                                _ ->
-%%                                                    Acc3#{Identifier => Value}
-%%                                            end
-%%                                    end
-%%                            end;
-%%                        #{<<"identifier">> := Identifier, <<"type">> := Type, <<"wumoxing">> := #{<<"identifier">> := Key}} ->
-%%                            case maps:get(Key, Data, null) of
-%%                                null ->
-%%                                    Acc3;
-%%                                Value ->
-%%                                    case Type of
-%%                                        <<"video">> ->
-%%                                            Acc3#{Identifier => Data};
-%%                                        _ ->
-%%                                            Acc3#{Identifier => Value}
-%%                                    end
-%%                            end;
-%%                        _ -> Acc3
-%%                    end
-%%                            end, #{}, Components);
-%%            _ -> #{}
-%%        end,
-%%    Acc ++ [Device#{<<"lasttime">> => Time, <<"swtopo">> => Topo, <<"tddata">> => maps:values(TdData)}].
+%% Thing 概要: 导库 描述:查询物模型
+%% OperationId:get_thing
+%% 请求:GET /iotapi/get_thing
+getThing(ProductId, ModuleType, SessionToken) ->
+    case dgiot_parse:get_object(<<"Product">>, ProductId, [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
+        {ok, #{<<"thing">> := Thing}} ->
+            Modules = maps:get(ModuleType, Thing, []),
+            {_, Maps} =
+                lists:foldl(fun(X, {Num, Acc}) ->
+                    case X of
+                        #{<<"updateAt">> := UpdateAt} ->
+                            BinUpdateAt = dgiot_utils:to_binary(UpdateAt),
+                            {Num, Acc#{BinUpdateAt => X}};
+                        _ ->
+                            BinUpdateAt = dgiot_utils:to_binary(1577854035000 + Num),
+                            {Num + 1, Acc#{BinUpdateAt => X}}
+                    end
+                            end, {0, #{}}, Modules),
+            Keys = maps:keys(Maps),
+            NewModules =
+                lists:foldl(fun(X, Acc) ->
+                    Acc ++ [maps:get(X, Maps)]
+                            end, [], lists:sort(Keys)),
+            {ok, NewModules};
+        Error ->
+            {error, Error}
+    end.
+
+%% Thing 概要: 导库 描述:添加物模型
+%% OperationId:post_thing
+%% 请求:POST /iotapi/post_thing
+postThing(ProductId, Item, SessionToken) ->
+    case dgiot_parse:get_object(<<"Product">>, ProductId, [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
+        {ok, #{<<"thing">> := Thing}} ->
+            ModuleType = maps:get(<<"moduleType">>, Item, <<"properties">>),
+            Modules = maps:get(ModuleType, Thing, []),
+            #{<<"identifier">> := Identifier} = Item,
+            {Ids, NewModules} =
+                lists:foldl(fun(X, {Ids1, Acc}) ->
+                    case X of
+                        #{<<"identifier">> := Identifier} ->
+                            {Ids1 ++ [Identifier], Acc};
+                        _ ->
+                            {Ids1, Acc ++ [X]}
+                    end
+                            end, {[], [Item]}, Modules),
+            case length(Ids) of
+                0 ->
+                    {_, R} = dgiot_parse:update_object(<<"Product">>, ProductId,
+                        #{<<"thing">> => Thing#{ModuleType => NewModules}},
+                        [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]),
+                    {ok, R#{<<"code">> => 200}};
+                _ ->
+                    {ok, #{<<"code">> => 204, <<"msg">> => <<Identifier/binary, " already existed">>}}
+            end;
+        Error ->
+            {error, Error}
+    end.
+
+%% Thing 概要: 导库 描述:更新模型
+%% OperationId:put_thing
+%% 请求:PUT /iotapi/put_thing
+putTing(ProductId, Item, SessionToken) ->
+    ModuleType = maps:get(<<"moduleType">>, Item, <<"properties">>),
+    #{<<"identifier">> := Identifier} = Item,
+    case dgiot_parse:get_object(<<"Product">>, ProductId, [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
+        {ok, #{<<"thing">> := Thing}} ->
+            Modules = maps:get(ModuleType, Thing, []),
+            NewModules =
+                lists:foldl(
+                    fun(X, Acc) ->
+                        case X of
+                            #{<<"identifier">> := Identifier} ->
+                                Acc ++ [Item];
+                            _ ->
+                                Acc ++ [X]
+                        end
+                    end, [], Modules),
+            {_, R} = dgiot_parse:update_object(<<"Product">>, ProductId,
+                #{<<"thing">> => Thing#{ModuleType => NewModules}},
+                [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]),
+            {ok, R#{<<"code">> => 200}};
+        Error ->
+            {error, Error}
+    end.
+
+%% Thing 概要: 导库 描述:删除模型
+%% OperationId:delete_thing
+%% 请求:DELETE /iotapi/delete_thing
+deleteThing(ProductId, SessionToken, Item) ->
+    #{<<"identifier">> := Identifier} = Item,
+    ModuleType = maps:get(<<"moduleType">>, Item, <<"properties">>),
+    case dgiot_parse:get_object(<<"Product">>, ProductId, [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
+        {ok, #{<<"thing">> := Thing}} ->
+            Modules = maps:get(ModuleType, Thing),
+            {Ids, NewModules} =
+                lists:foldl(fun(X, {Ids1, Acc}) ->
+                    case X of
+                        #{<<"identifier">> := Identifier} ->
+                            {Ids1, Acc};
+                        #{<<"identifier">> := Identifier1, <<"dataForm">> := #{<<"collection">> := Collection}} ->
+                            case binary:match(Collection, [Identifier]) of
+                                nomatch ->
+                                    {Ids1, Acc ++ [X]};
+                                _ ->
+                                    case Ids1 of
+                                        [] ->
+                                            {Ids1 ++ [Identifier1], Acc};
+                                        _ ->
+                                            {Ids1 ++ [<<",", Identifier1/binary>>], Acc}
+                                    end
+                            end;
+                        _ ->
+                            {Ids1, Acc ++ [X]}
+                    end
+                            end, {[], []}, Modules),
+            case length(Ids) == 0 of
+                true ->
+                    {_, R} = dgiot_parse:update_object(<<"Product">>, ProductId,
+                        #{<<"thing">> => Thing#{ModuleType => NewModules}},
+                        [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]),
+                    {ok, R#{<<"code">> => 200}};
+                false ->
+                    BinIds = dgiot_utils:to_binary(Ids),
+                    {ok, #{<<"code">> => 204, <<"msg">> => <<BinIds/binary, " use ", Identifier/binary>>}}
+            end;
+        Error ->
+            {error, Error}
+    end.
+
+set_children(ClassTree, Data) ->
+    lists:foldl(fun(#{<<"objectId">> := ObjectId} = Class, Acc) ->
+        NewClass =
+            case maps:find(<<"children">>, Class) of
+                {ok, Children1} when length(Children1) > 0 ->
+                    Class#{<<"children">> => set_children(Children1, Data)};
+                _ ->
+                    case maps:get(ObjectId, Data, []) of
+                        Child when length(Child) > 0 ->
+                            Class#{<<"children">> => maps:get(ObjectId, Data, [])};
+                        _ ->
+                            []
+                    end
+            end,
+        case NewClass of
+            [] ->
+                Acc;
+            _ ->
+                Acc ++ [NewClass]
+        end
+                end, [], ClassTree).
+
+sync_files(#{<<"__path__">> := <<"/upload">>, <<"path">> := Path, <<"filename">> := Name} = _Info, Role, _AuthToken) ->
+    FilesId = dgiot_parse_id:get_filesId(Path, Name),
+    Acl = dgiot_role:get_acl(Role),
+    case dgiot_parse:get_object(<<"Files">>, FilesId) of
+        {ok, #{<<"data">> := _Data}} ->
+            dgiot_parse:update_object(<<"Files">>, FilesId, #{<<"ACL">> => Acl, <<"path">> => Path, <<"name">> => Name});
+        _ ->
+            dgiot_parse:create_object(<<"Files">>,
+                #{
+                    <<"ACL">> => Acl,
+                    <<"path">> => Path,
+                    <<"name">> => Name,
+                    <<"type">> => filename:extension(Name)
+                })
+    end;
+
+sync_files(#{<<"__path__">> := <<"/delete">>, <<"path">> := Path} = _Info, _Role, AuthToken) ->
+    FilesId = dgiot_parse_id:get_filesId(filename:dirname(Path), filename:basename(Path)),
+    case dgiot_parse:get_object(<<"Files">>, FilesId, [{"X-Parse-Session-Token", AuthToken}], [{from, rest}]) of
+        {ok, #{<<"data">> := _}} ->
+            dgiot_parse:del_object(<<"Files">>, FilesId);
+        _ ->
+
+            pass
+    end;
+
+sync_files(_Info, _Role, _AuthToken) ->
+    pass.
+
+

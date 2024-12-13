@@ -1,10 +1,5 @@
 {
-  "tags": [
-    {
-      "name": "Data",
-      "description": "数据管理"
-    }
-  ],
+  "tags": [],
   "definitions": {
   },
   "paths": {
@@ -51,7 +46,7 @@
             "description": "需要显示的字段,加count(*)则结果里面会显示总记录数, last_row为获取最后一条记录, tbname,为设备字段, eg: username,email",
             "required": false,
             "type": "string",
-            "default":"last_row(*)"
+            "default": "last_row(*)"
           },
           {
             "in": "query",
@@ -79,7 +74,7 @@
             "description": "聚合时间段: 10a",
             "required": false,
             "type": "string",
-            "default":"10a"
+            "default": "10a"
           },
           {
             "in": "query",
@@ -108,7 +103,7 @@
           }
         },
         "tags": [
-          "Data"
+          "Basic"
         ]
       }
     },
@@ -160,7 +155,7 @@
             "in": "query",
             "name": "where",
             "description": "过滤条件，eg: {\"createdat\": {\"$gte\":\"now - 10d\"}}",
-            "default":"{\"createdat\":{\"$gte\":\"now - 10d\"}}",
+            "default": "{\"createdat\":{\"$gte\":\"now - 10d\"}}",
             "required": false,
             "type": "string"
           }
@@ -183,7 +178,7 @@
           }
         },
         "tags": [
-          "Data"
+          "Basic"
         ]
       }
     },
@@ -192,6 +187,27 @@
         "summary": "获取当前设备时序数据图表",
         "description": "获取当前设备数据图表，支持折线图，柱状图，饼图等",
         "parameters": [
+          {
+            "in": "query",
+            "name": "style",
+            "description": "图标类型",
+            "default": "line",
+            "required": true,
+            "type": "string",
+            "enum": [
+              "amis_table",
+              "line",
+              "echart_category"
+            ]
+          },
+          {
+            "in": "query",
+            "name": "month_count",
+            "description": "月份数量",
+            "default": "1",
+            "required": false,
+            "type": "number"
+          },
           {
             "in": "path",
             "name": "deviceid",
@@ -266,7 +282,7 @@
               "last"
             ],
             "default": "last",
-            "required": true,
+            "required": false,
             "type": "string"
           }
         ],
@@ -288,11 +304,11 @@
           }
         },
         "tags": [
-          "Data"
+          "View"
         ]
       }
     },
-    "/app/{deviceid}": {
+    "/devicecard/{deviceid}": {
       "get": {
         "summary": "获取当前设备最新时序数据卡片",
         "description": "获取当前设备最新时序数据卡片",
@@ -301,6 +317,48 @@
             "in": "path",
             "name": "deviceid",
             "required": true,
+            "default": "a90437ec84",
+            "description": "设备ID",
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "keys",
+            "description": "需要显示的字段, eg: username,email",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns operation status"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Server Internal error"
+          }
+        },
+        "tags": [
+          "View"
+        ]
+      }
+    },
+    "/gps/track/{deviceid}": {
+      "get": {
+        "summary": "获取当前设备gps轨迹",
+        "description": "获取当前设备gps轨迹",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deviceid",
             "default": "a90437ec84",
             "description": "设备ID",
             "type": "string"
@@ -324,7 +382,60 @@
           }
         },
         "tags": [
-          "Data"
+          "View"
+        ]
+      }
+    },
+    "/save_td": {
+      "post": {
+        "description": "存td",
+        "parameters": [
+          {
+            "description": "存储数据到td",
+            "in": "body",
+            "name": "data",
+            "required": true,
+            "schema": {
+              "properties": {
+                "productid": {
+                  "description": "产品id",
+                  "type": "string",
+                  "required": true,
+                  "example": ""
+                },
+                "devaddr": {
+                  "description": "设备地址",
+                  "type": "string",
+                  "required": true,
+                  "example": ""
+                },
+                "data": {
+                  "description": "存储数据",
+                  "type": "object",
+                  "required": true,
+                  "example": {}
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns operation status"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Server Internal error"
+          }
+        },
+        "summary": "存储数据到td",
+        "tags": [
+          "Basic"
         ]
       }
     }

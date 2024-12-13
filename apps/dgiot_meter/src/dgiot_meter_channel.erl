@@ -52,7 +52,7 @@
 %%|                              |                                       |
 %%ACL                            ACL            <--parse--> shuaw_parse --+
 %%+                              +                                       |              +-- 时序数据--+
-%%Group(Devcie)                 Group(Devcie)                                |              |            |
+%%Group(Device)                 Group(Device)                                |              |            |
 %%|                              |                                       | === 流计算==> 物理层镜像    +--> 批量计算
 %%+--------+-------+                      +                                       |              |            |
 %%|                |                      |                                       |              +-- 关系数据--+
@@ -116,7 +116,11 @@
         type => enum,
         required => false,
         default => <<"quick"/utf8>>,
-        enum => [<<"nosearch">>, <<"quick">>, <<"normal">>],
+        enum => [
+            #{<<"value">> => <<"nosearch">>, <<"label">> => <<"nosearch"/utf8>>},
+            #{<<"value">> => <<"quick">>, <<"label">> => <<"quick"/utf8>>},
+            #{<<"value">> => <<"normal">>, <<"label">> => <<"normal"/utf8>>}
+        ],
         title => #{
             zh => <<"搜表模式"/utf8>>
         },
@@ -124,11 +128,23 @@
             zh => <<"搜表模式:nosearch|quick|normal"/utf8>>
         }
     },
+    <<"len">> => #{
+        order => 3,
+        type => integer,
+        required => true,
+        default => 15,
+        title => #{
+            zh => <<"登录报文长度"/utf8>>
+        },
+        description => #{
+            zh => <<"登录报文长度,默认15位IEMI码"/utf8>>
+        }
+    },
     <<"ico">> => #{
         order => 102,
         type => string,
         required => false,
-        default => <<"http://dgiot-1253666439.cos.ap-shanghai-fsi.myqcloud.com/shuwa_tech/zh/product/dgiot/channel/meter.jpg">>,
+        default => <<"/dgiot_file/shuwa_tech/zh/product/dgiot/channel/meter_channel.png">>,
         title => #{
             en => <<"channel ICO">>,
             zh => <<"通道ICO"/utf8>>
@@ -148,23 +164,52 @@ start(ChannelId, ChannelArgs) ->
 init(?TYPE, ChannelId, #{
     <<"port">> := Port,
     <<"product">> := Products,
-    <<"search">> := Search}) ->
+    <<"search">> := Search} = Args) ->
     lists:map(fun(X) ->
         case X of
-            {ProductId, #{<<"ACL">> := Acl, <<"nodeType">> := 1, <<"thing">> := Thing}} ->
-                dgiot_data:insert({dtu, ChannelId}, {ProductId, Acl, maps:get(<<"properties">>, Thing, [])});
-            {ProductId, #{<<"ACL">> := Acl, <<"nodeType">> := 3, <<"thing">> := Thing}} ->
-                dgiot_data:insert({dtu, ChannelId}, {ProductId, Acl, maps:get(<<"properties">>, Thing, [])});
-            {ProductId, #{<<"ACL">> := Acl, <<"thing">> := Thing}} ->
-                dgiot_data:insert({meter, ChannelId}, {ProductId, Acl, maps:get(<<"properties">>, Thing, [])});
+            {ProductId, #{<<"ACL">> := Acl, <<"nodeType">> := 1}} ->
+                Props = dgiot_product:get_props(ProductId, <<"*">>),
+                dgiot_data:insert({dtu, ChannelId}, {ProductId, Acl, Props}),
+                lists:map(fun(Prop) ->
+                    case Prop of
+                        #{<<"identifier">> := Identifier, <<"dataSource">> := #{<<"da">> := Da, <<"dt">> := Dt}} ->
+                            dgiot_data:insert({protocol, <<Da/binary, Dt/binary>>, ProductId}, Identifier);
+                        _ ->
+                            pass
+                    end
+                          end, Props);
+            {ProductId, #{<<"ACL">> := Acl, <<"nodeType">> := 3}} ->
+                Props = dgiot_product:get_props(ProductId, <<"*">>),
+                dgiot_data:insert({dtu, ChannelId}, {ProductId, Acl, Props});
+            {ProductId, #{<<"ACL">> := Acl}} ->
+                Props = dgiot_product:get_props(ProductId, <<"*">>),
+                dgiot_data:insert({meter, ChannelId}, {ProductId, Acl, Props}),
+                lists:map(fun(Prop) ->
+                    case Prop of
+                        #{<<"identifier">> := Identifier, <<"dataSource">> := #{<<"di">> := Di}} ->
+                            dgiot_data:insert({protocol, Di, ProductId}, Identifier);
+                        #{<<"identifier">> := Identifier, <<"dataSource">> := #{<<"da">> := Da, <<"dt">> := Dt}} ->
+                            dgiot_data:insert({protocol, <<Da/binary, Dt/binary>>, ProductId}, Identifier);
+                        _ ->
+                            pass
+                    end
+                          end, Props);
             _ ->
                 pass
         end
               end, Products),
     dgiot_data:set_consumer(ChannelId, 20),
+    Len =
+        case maps:find(<<"len">>, Args) of
+            error ->
+                15;
+            {ok, Len1} ->
+                Len1
+        end,
     State = #state{
         id = ChannelId,
-        search = Search
+        search = Search,
+        len = Len
     },
     {ok, State, dgiot_meter_tcp:start(Port, State)};
 
@@ -174,34 +219,23 @@ init(?TYPE, _ChannelId, _Args) ->
 handle_init(State) ->
     {ok, State}.
 
-%% 通道消息处理,注意：进程池调用
-%%SELECT username as productid, clientid, connected_at FROM "$events/client_connected" WHERE username = 'bffb6a3a27'
-handle_event('client.connected', {rule, #{peername := PeerName}, #{<<"clientid">> := DtuAddr, <<"productid">> := ProductId} = _Select}, State) ->
-    [DTUIP, _] = binary:split(PeerName, <<$:>>, [global, trim]),
-    DeviceId = dgiot_parse:get_deviceid(ProductId, DtuAddr),
-    case dgiot_device:lookup(DeviceId) of
-        {ok, _V} ->
-            dgiot_device:put(#{<<"objectId">> => DeviceId});
-        _ ->
-            dgiot_meter:create_dtu(mqtt, DtuAddr, ProductId, DTUIP)
-    end,
-    {ok, State};
+%%%% 通道消息处理,注意：进程池调用
+%%%%SELECT username as productid, clientid, connected_at FROM "$events/client_connected" WHERE username = 'bffb6a3a27'
+%%handle_event('client.connected', {rule, #{peername := PeerName}, #{<<"clientid">> := DtuAddr, <<"productid">> := ProductId} = _Select}, State) ->
+%%    [DTUIP, _] = binary:split(PeerName, <<$:>>, [global, trim]),
+%%    DeviceId = dgiot_parse_id:get_deviceid(ProductId, DtuAddr),
+%%    case dgiot_device:lookup(DeviceId) of
+%%        {ok, _V} ->
+%%            dgiot_device:put(#{<<"objectId">> => DeviceId});
+%%        _ ->
+%%            dgiot_meter:create_dtu(mqtt, DtuAddr, ProductId, DTUIP)
+%%    end,
+%%    {ok, State};
 
 %% 通道消息处理,注意：进程池调用
 handle_event(EventId, Event, State) ->
     ?LOG(error, "EventId ~p Event ~p", [EventId, Event]),
     {ok, State}.
-
-% SELECT clientid, payload, topic FROM "meter"
-% SELECT clientid, disconnected_at FROM "$events/client_disconnected" WHERE username = 'dgiot'
-% SELECT clientid, connected_at FROM "$events/client_connected" WHERE username = 'dgiot'
-handle_message({rule, #{clientid := DevAddr, disconnected_at := _DisconnectedAt}, _Context}, State) ->
-    ?LOG(error, "DevAddr ~p ", [DevAddr]),
-    {ok, State};
-
-handle_message({rule, #{clientid := DevAddr, payload := Payload, topic := _Topic}, _Msg}, #state{id = ChannelId} = State) ->
-    ?LOG(error, "DevAddr ~p Payload ~p ChannelId ~p", [DevAddr, Payload, ChannelId]),
-    {ok, State};
 
 handle_message(_Message, State) ->
     {ok, State}.

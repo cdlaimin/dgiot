@@ -18,118 +18,106 @@
 -author("johnliu").
 -include("dgiot_socket.hrl").
 -include_lib("dgiot/include/logger.hrl").
+-include_lib("dgiot/include/dgiot_client.hrl").
 -behaviour(gen_server).
 %% API
--export([start_link/6, start_link/4, start_link/5, start_link/3, start_link/7, send/2]).
+-export([start_link/1, send/1, send/2, send/3]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--record(state, {host, port, child = #tcp{}, mod, reconnect_times, reconnect_sleep = 30}).
+-record(connect_state, {host, port, mod, socket = undefined, freq = 30, count = 1000}).
 -define(TIMEOUT, 10000).
 -define(TCP_OPTIONS, [binary, {active, once}, {packet, raw}, {reuseaddr, false}, {send_timeout, ?TIMEOUT}]).
 
+start_link(Args) ->
+    dgiot_client:start_link(?MODULE, Args).
 
-start_link(Mod, Host, Port) ->
-    start_link(Mod, Host, Port, undefined).
-
-start_link(Mod, Host, Port, Args) ->
-    start_link(Mod, Host, Port, max, 30, Args).
-
-start_link(Name, Mod, Host, Port, Args) ->
-    start_link(Name, Mod, Host, Port, max, 30, Args).
-
-start_link(Mod, Host, Port, ReconnectTimes, ReconnectSleep, Args) ->
-    start_link(undefined, Mod, Host, Port, ReconnectTimes, ReconnectSleep, Args).
-
-start_link(Name, Mod, Host, Port, ReconnectTimes, ReconnectSleep, Args) ->
-    Ip =
-        case is_binary(Host) of
-            true -> binary_to_list(Host);
-            false -> Host
+init([#{<<"channel">> := ChannelId, <<"client">> := ClientId, <<"ip">> := Host, <<"port">> := Port, <<"mod">> := Mod} = Args]) ->
+    Ip = dgiot_utils:to_list(Host),
+    Port1 = dgiot_utils:to_int(Port),
+    UserData = #connect_state{mod = Mod, host = Ip, port = Port1, freq = 30, count = 300},
+    ChildState = maps:get(<<"child">>, Args, #{}),
+    StartTime = dgiot_client:get_time(maps:get(<<"starttime">>, Args, dgiot_datetime:now_secs())),
+    EndTime = dgiot_client:get_time(maps:get(<<"endtime">>, Args, dgiot_datetime:now_secs() + 1000000000)),
+    Freq = maps:get(<<"freq">>, Args, 30),
+    NextTime = dgiot_client:get_nexttime(StartTime, Freq),
+    Count = dgiot_client:get_count(StartTime, EndTime, Freq),
+    Rand =
+        case maps:get(<<"rand">>, Args, true) of
+            true -> 0;
+            _ -> dgiot_client:get_rand(Freq)
         end,
-    Port1 =
-        case Port of
-            _ when is_binary(Port) ->
-                binary_to_integer(Port);
-            _ when is_list(Port) ->
-                list_to_integer(Port);
-            _ when is_integer(Port) ->
-                Port
-        end,
-    State = #state{
-        mod = Mod,
-        host = Ip,
-        port = Port1,
-        reconnect_times = ReconnectTimes, %% 重连次数
-        reconnect_sleep = ReconnectSleep  %% 重连间隔
-    },
-    case Name of
-        undefined ->
-            gen_server:start_link(?MODULE, [State, Args], []);
-        _ ->
-            gen_server:start_link({local, Name}, ?MODULE, [State, Args], [])
-    end.
-
-
-init([#state{mod = Mod} = State, Args]) ->
-    Transport = gen_tcp,
-    Child = #tcp{transport = Transport, socket = undefined},
-    case Mod:init(Child#tcp{state = Args}) of
-        {ok, ChildState} ->
-            NewState = State#state{
-                child = ChildState
-            },
-            {ok, do_connect(false, NewState), hibernate};
+    Clock = #dclock{freq = Freq, nexttime = NextTime + Rand, count = Count, round = 0},
+    Dclient = #dclient{channel = ChannelId, client = ClientId, status = ?DCLIENT_INTIALIZED, clock = Clock, userdata = UserData, child = ChildState},
+    dgiot_client:add(ChannelId, ClientId),
+    case Mod:init(Dclient) of
+        {ok, NewDclient} ->
+            do_connect(NewDclient),
+            {ok, NewDclient, hibernate};
         {stop, Reason} ->
             {stop, Reason}
     end.
 
-handle_call({connection_ready, Socket}, _From, #state{mod = Mod, child = ChildState} = State) ->
-    NewChildState = ChildState#tcp{socket = Socket},
-    case Mod:handle_info(connection_ready, NewChildState) of
-        {noreply, NewChildState1} ->
-            {reply, ok, State#state{child = NewChildState1}, hibernate};
-        {stop, Reason, NewChildState1} ->
-            {stop, Reason, {error, Reason}, State#state{child = NewChildState1}}
+handle_call({connection_ready, Socket}, _From, #dclient{ channel = ChannelId, client = ClientId, userdata = #connect_state{mod = Mod} = UserData} = Dclient) ->
+    NewUserData = UserData#connect_state{socket = Socket},
+    case Mod:handle_info(connection_ready, Dclient#dclient{userdata = NewUserData}) of
+        {noreply, NewDclient} ->
+            {reply, ok, NewDclient, hibernate};
+        {stop, _Reason, NewDclient} ->
+            dgiot_client:stop(ChannelId, ClientId),
+            {reply, _Reason, NewDclient}
     end;
 
-handle_call(Request, From, #state{mod = Mod, child = ChildState} = State) ->
-    case Mod:handle_call(Request, From, ChildState) of
-        {reply, Reply, NewChildState} ->
-            {reply, Reply, State#state{child = NewChildState}, hibernate};
-        {stop, Reason, NewChildState} ->
-            {stop, Reason, State#state{child = NewChildState}}
+handle_call(Request, From, #dclient{channel = ChannelId, client = ClientId, userdata = #connect_state{mod = Mod}} = Dclient) ->
+    case Mod:handle_call(Request, From, Dclient) of
+        {reply, Reply, NewDclient} ->
+            {reply, Reply, NewDclient, hibernate};
+        {stop, Reason, NewDclient} ->
+            dgiot_client:stop(ChannelId, ClientId),
+            {reply, Reason, NewDclient}
     end.
 
-handle_cast(Msg, #state{mod = Mod, child = ChildState} = State) ->
-    case Mod:handle_cast(Msg, ChildState) of
-        {noreply, NewChildState} ->
-            {noreply, State#state{child = NewChildState}, hibernate};
-        {stop, Reason, NewChildState} ->
-            {stop, Reason, State#state{child = NewChildState}}
+handle_cast(Msg, #dclient{channel = ChannelId, client = ClientId,
+    userdata = #connect_state{mod = Mod}} = Dclient) ->
+    case Mod:handle_cast(Msg, Dclient) of
+        {noreply, NewDclient} ->
+            {noreply, NewDclient, hibernate};
+        {stop, Reason, NewDclient} ->
+            dgiot_client:stop(ChannelId, ClientId),
+            {reply, Reason, NewDclient}
     end.
 
 %% 连接次数为0了
-handle_info(do_connect, State) ->
-    %?LOG(info,"CONNECT CLOSE ~s:~p", [State#state.host, State#state.port]),
-    {stop, normal, State};
+handle_info(do_connect, #dclient{channel = ChannelId, client = ClientId, userdata = #connect_state{count = Count}} = Dclient) when Count =< 0 ->
+    dgiot_client:stop(ChannelId, ClientId),
+    {noreply, Dclient, hibernate};
+handle_info(do_connect, #dclient{userdata = #connect_state{count = Count, freq = Freq} = UserData} = Dclient) ->
+    timer:sleep(Freq * 1000),
+    NewDclient = Dclient#dclient{userdata = UserData#connect_state{count = Count - 1}},
+    do_connect(NewDclient),
+    {noreply, NewDclient, hibernate};
 
-%% 连接次数为0了
-handle_info(connect_stop, State) ->
-    %?LOG(info,"CONNECT CLOSE ~s:~p", [State#state.host, State#state.port]),
-    {stop, normal, State};
-
-handle_info({connection_ready, Socket}, #state{mod = Mod, child = ChildState} = State) ->
-    NewChildState = ChildState#tcp{socket = Socket},
-%%    ?LOG(info,"connection_ready ~p~n", [Socket]),
-    case Mod:handle_info(connection_ready, NewChildState) of
-        {noreply, NewChildState1} ->
+handle_info({connection_ready, Socket}, #dclient{userdata = #connect_state{mod = Mod} = UserData} = Dclient) ->
+    dgiot_metrics:inc(dgiot, <<"tcpc_online">>, 1),
+    case Mod:handle_info(connection_ready, Dclient#dclient{userdata = UserData#connect_state{socket = Socket}}) of
+        {noreply, NewDclient} ->
             inet:setopts(Socket, [{active, once}]),
-            {noreply, State#state{child = NewChildState1}, hibernate};
-        {stop, Reason, NewChildState1} ->
-            {stop, Reason, State#state{child = NewChildState1}}
+            {noreply, NewDclient, hibernate};
+        {stop, Reason, NewDclient} ->
+            {stop, Reason, NewDclient}
     end;
 
-handle_info({tcp, Socket, Binary}, State) ->
-    #state{mod = Mod, child = #tcp{socket = Socket} = ChildState} = State,
+%% 往tcp server 发送报文
+handle_info({send, _PayLoad}, #dclient{userdata = #connect_state{socket = undefined}} = Dclient) ->
+    {noreply, Dclient, hibernate};
+handle_info({send, PayLoad}, #dclient{userdata = #connect_state{host = _Ip, port = _Port, socket = Socket}} = Dclient) ->
+%%    io:format("~s ~p ~p send to from ~p:~p : ~p ~n", [?FILE, ?LINE, self(), _Ip, _Port, dgiot_utils:to_hex(PayLoad)]),
+    gen_tcp:send(Socket, PayLoad),
+    dgiot_metrics:inc(dgiot, <<"tcpc_send">>, 1),
+    {noreply, Dclient, hibernate};
+
+%% 接收tcp server发送过来的报文
+handle_info({tcp, Socket, Binary}, #dclient{userdata = #connect_state{host = _Ip, port = _Port, mod = Mod}} = Dclient) ->
+%%    io:format("~s ~p recv from ~p:~p ~p ~n", [?FILE, ?LINE, _Ip, _Port, dgiot_utils:to_hex(Binary)]),
+    dgiot_metrics:inc(dgiot, <<"tcpc_recv">>, 1),
     NewBin =
         case binary:referenced_byte_size(Binary) of
             Large when Large > 2 * byte_size(Binary) ->
@@ -137,136 +125,79 @@ handle_info({tcp, Socket, Binary}, State) ->
             _ ->
                 Binary
         end,
-    write_log(ChildState#tcp.log, <<"RECV">>, NewBin),
-    case Mod:handle_info({tcp, NewBin}, ChildState) of
-        {noreply, NewChildState} ->
-            inet:setopts(ChildState#tcp.socket, [{active, once}]),
-            {noreply, State#state{child = NewChildState}, hibernate};
-        {stop, Reason, NewChildState} ->
-            {stop, Reason, State#state{child = NewChildState}}
+    case Mod:handle_info({tcp, NewBin}, Dclient) of
+        {noreply, NewDclient} ->
+            inet:setopts(Socket, [{active, once}]),
+            {noreply, NewDclient, hibernate};
+        {stop, Reason, #dclient{channel = ChannelId, client = ClientId} = NewDclient} ->
+            dgiot_client:stop(ChannelId, ClientId),
+            {noreply, Reason, NewDclient, hibernate}
     end;
 
-handle_info({tcp_error, _Socket, Reason}, #state{child = ChildState} = State) ->
-    write_log(ChildState#tcp.log, <<"ERROR">>, list_to_binary(io_lib:format("~p", [Reason]))),
-    {noreply, State, hibernate};
+handle_info({tcp_error, _Socket, _Reason}, Dclient) ->
+    {noreply, Dclient, hibernate};
 
-handle_info({Closed, _Sock}, #state{mod = Mod, child = #tcp{transport = Transport, socket = Socket} = ChildState} = State) when Closed == tcp_closed ->
-    Transport:close(Socket),
-    write_log(ChildState#tcp.log, <<"ERROR">>, <<"tcp_closed">>),
-    case Mod:handle_info(Closed, ChildState) of
-        {noreply, NewChildState} ->
-            NewState = State#state{child = NewChildState#tcp{socket = undefined}},
-            case is_integer(NewState#state.reconnect_sleep) of
-                false ->
-                    {stop, normal, NewState};
-                true ->
-                    Now = erlang:system_time(second),
-                    Sleep =
-                        case get(last_closed) of
-                            Time when is_integer(Time) andalso Now - Time < State#state.reconnect_sleep ->
-                                true;
-                            _ ->
-                                false
-                        end,
-                    put(last_closed, Now),
-                    {noreply, do_connect(Sleep, NewState), hibernate}
-            end;
-        {stop, Reason, NewChildState} ->
-            {stop, Reason, State#state{child = NewChildState#tcp{socket = undefined}}}
+handle_info({tcp_closed, Socket}, #dclient{channel = ChannelId, client = ClientId, userdata = #connect_state{mod = Mod}} = Dclient) ->
+    dgiot_metrics:dec(dgiot, <<"tcpc_online">>, 1),
+    gen_tcp:close(Socket),
+    case Mod:handle_info(tcp_closed, Dclient) of
+        {noreply, NewDclient} ->
+            self() ! do_connect,
+            {noreply, NewDclient, hibernate};
+        {stop, _Reason, NewDclient} ->
+            dgiot_client:stop(ChannelId, ClientId),
+            {noreply, NewDclient, hibernate}
     end;
 
-handle_info(Info, #state{mod = Mod, child = ChildState} = State) ->
-    case Mod:handle_info(Info, ChildState) of
-        {noreply, NewChildState} ->
-            {noreply, State#state{child = NewChildState}, hibernate};
-        {stop, Reason, NewChildState} ->
-            {stop, Reason, State#state{child = NewChildState}}
+handle_info(Info, #dclient{channel = ChannelId, client = ClientId, userdata = #connect_state{mod = Mod, socket = Socket}} = Dclient) ->
+    case Mod:handle_info(Info, Dclient) of
+        {noreply, NewDclient} ->
+            {noreply, NewDclient, hibernate};
+        {stop, _Reason, NewDclient} ->
+            gen_tcp:close(Socket),
+            timer:sleep(10),
+            dgiot_client:stop(ChannelId, ClientId),
+            {noreply, NewDclient, hibernate}
     end.
 
-terminate(Reason, #state{mod = Mod, child = ChildState}) ->
-    Mod:terminate(Reason, ChildState).
+terminate(Reason, #dclient{userdata = #connect_state{mod = Mod}} = Dclient) ->
+    dgiot_metrics:dec(dgiot, <<"tcpc_online">>, 1),
+    Mod:terminate(Reason, Dclient).
 
-code_change(OldVsn, #state{mod = Mod, child = ChildState} = State, Extra) ->
-    {ok, NewChildState} = Mod:code_change(OldVsn, ChildState, Extra),
-    {ok, State#state{child = NewChildState}}.
+code_change(OldVsn, #dclient{userdata = #connect_state{mod = Mod}} = Dclient, Extra) ->
+    Mod:code_change(OldVsn, Dclient, Extra).
 
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+send(Socket, Payload) ->
+    gen_tcp:send(Socket, Payload).
 
-send(#tcp{transport = Transport, socket = Socket, log = Log}, Payload) ->
-    write_log(Log, <<"SEND">>, Payload),
-    case Socket == undefined of
-        true ->
-            {error, disconnected};
-        false ->
-            timer:sleep(1),
-            Transport:send(Socket, Payload)
+send(Payload) ->
+    self() ! {send, Payload}.
+
+send(ChannelId, ClientId, Payload) ->
+    case dgiot_client:get(ChannelId, ClientId) of
+        {ok, Pid} ->
+            Pid ! {send, Payload};
+        _ ->
+            pass
     end.
 
-do_connect(Sleep, #state{child = TCPState} = State) ->
-    Client = self(),
-    NewState = State#state{
-        child = TCPState#tcp{
-            socket = undefined
-        }
-    },
-    spawn(
-        fun() ->
-            Sleep andalso timer:sleep(State#state.reconnect_sleep * 1000),
-            connect(Client, NewState)
-        end),
-    NewState.
-
-connect(Client, #state{host = Host, port = Port, reconnect_times = Times, reconnect_sleep = Sleep, child = #tcp{transport = Transport}} = State) ->
-    case is_process_alive(Client) of
-        true ->
-            %% ?LOG(info,"CONNECT ~s:~p ~p", [Host, Port, Times]),
-            case Transport:connect(Host, Port, ?TCP_OPTIONS, ?TIMEOUT) of
-                {ok, Socket} ->
-                    case catch gen_server:call(Client, {connection_ready, Socket}, 50000) of
-                        ok ->
-                            inet:setopts(Socket, [{active, once}]),
-                            Transport:controlling_process(Socket, Client);
-                        _ ->
-                            ok
-                    end;
-                {error, Reason} ->
-                    case is_integer(Times) of
-                        true when Times - 1 > 0 ->
-                            Client ! {connection_error, Reason},
-                            timer:sleep(Sleep * 1000),
-                            connect(Client, State#state{reconnect_times = Times - 1});
-                        false when is_atom(Times) ->
-                            Client ! {connection_error, Reason},
-                            timer:sleep(Sleep * 1000),
-                            connect(Client, State);
-                        _ ->
-                            Client ! connect_stop
-                    end
+do_connect(#dclient{userdata = #connect_state{host = Host, port = Port}}) ->
+    case gen_tcp:connect(Host, Port, ?TCP_OPTIONS, ?TIMEOUT) of
+        {ok, Socket} ->
+            case catch gen_server:call(self(), {connection_ready, Socket}, 5000) of
+                ok ->
+                    inet:setopts(Socket, [{active, once}]),
+                    gen_tcp:controlling_process(Socket, self());
+                _ ->
+                    ok
             end;
-        false ->
-            ok
-    end.
+        {error, _Reason} ->
+            self() ! do_connect
+    end;
 
-
-
-write_log(file, Type, Buff) ->
-    [Pid] = io_lib:format("~p", [self()]),
-    Date = dgiot_datetime:format("YYYY-MM-DD"),
-    Path = <<"log/tcp_client/", Date/binary, ".txt">>,
-    filelib:ensure_dir(Path),
-    Time = dgiot_datetime:format("HH:NN:SS " ++ Pid),
-    Data = case Type of
-               <<"ERROR">> -> Buff;
-               _ -> <<<<Y>> || <<X:4>> <= Buff, Y <- integer_to_list(X, 16)>>
-           end,
-    file:write_file(Path, <<Time/binary, " ", Type/binary, " ", Data/binary, "\r\n">>, [append]),
-    ok;
-write_log({Mod, Fun}, Type, Buff) ->
-    catch apply(Mod, Fun, [Type, Buff]);
-write_log(Fun, Type, Buff) when is_function(Fun) ->
-    catch Fun(Type, Buff);
-write_log(_, _, _) ->
-    ok.
+do_connect(_) ->
+    self() ! do_connect.

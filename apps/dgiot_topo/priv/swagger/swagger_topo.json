@@ -1,4 +1,5 @@
 {
+  "tags": [],
   "definitions": {},
   "paths": {
     "/topo": {
@@ -48,7 +49,7 @@
         },
         "summary": "获取产品组态",
         "tags": [
-          "TOPO"
+          "View"
         ]
       },
       "post": {
@@ -94,7 +95,7 @@
         },
         "summary": "发送组态",
         "tags": [
-          "TOPO"
+          "View"
         ]
       }
     },
@@ -137,7 +138,7 @@
         },
         "summary": "物模型详情",
         "tags": [
-          "TOPO"
+          "View"
         ]
       },
       "post": {
@@ -182,38 +183,7 @@
         },
         "summary": "组态修改",
         "tags": [
-          "TOPO"
-        ]
-      }
-    },
-    "/dashboard": {
-      "post": {
-        "description": "启动任务",
-        "parameters": [
-          {
-            "in": "body",
-            "name": "data",
-            "required": true,
-            "schema": {
-              "type": "object",
-              "properties": {}
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Returns instance data"
-          },
-          "404": {
-            "description": "object not found",
-            "schema": {
-              "$ref": "#/definitions/Error"
-            }
-          }
-        },
-        "summary": "启动任务",
-        "tags": [
-          "TOPO"
+          "View"
         ]
       }
     },
@@ -240,7 +210,7 @@
         },
         "summary": "查询设备参数字典",
         "tags": [
-          "TOPO"
+          "View"
         ]
       }
     },
@@ -267,15 +237,9 @@
         },
         "summary": "查询设备所拥有权限",
         "tags": [
-          "TOPO"
+          "View"
         ]
       }
     }
-  },
-  "tags": [
-    {
-      "name": "TOPO",
-      "description": "组态管理"
-    }
-  ]
+  }
 }

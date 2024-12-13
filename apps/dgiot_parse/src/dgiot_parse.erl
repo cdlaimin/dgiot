@@ -20,52 +20,40 @@
 -include_lib("dgiot/include/logger.hrl").
 -define(DEFField, re:split(application:get_env(?MODULE, delete_field, ""), ",")).
 
-
 %% API
--export([
-    login/2,
-    get_role/2,
-    add_to_role/4,
-    load_role/0,
-    save_User_Role/2,
-    del_User_Role/2,
-    put_User_Role/3,
-    create_session/3,
-    check_session/1,
-    refresh_session/1
-]).
 -export([
     health/0,
     health/1,
     init_database/2,
     create_object/2,
+    create_object/3,
     create_object/4,
     get_object/2,
+    get_object/3,
     get_object/4,
     update_object/3,
+    update_object/4,
     update_object/5,
     del_object/2,
     del_object/4,
     del_table/1,
-    create_schemas/1,
-    update_schemas/1,
-    del_schemas/1,
-    get_schemas/1,
     get_schemas/0,
+    get_schemas/1,
+    get_schemas/2,
+    create_schemas/1,
+    create_schemas/2,
+    update_schemas/1,
+    update_schemas/2,
+    del_schemas/1,
+    del_schemas/2,
     set_class_level/2,
+    del_filed_schemas/2,
+    del_filed_schemas/3,
     query_object/2,
     query_object/3,
     query_object/4,
     aggregate_object/2,
     aggregate_object/4,
-    add_trigger/3,
-    del_trigger/2,
-    del_trigger/1,
-    del_trigger/0,
-    update_trigger/3,
-    get_trigger/0,
-    get_trigger/2,
-    add_all_trigger/1,
     read_page/4,
     read_page/5,
     format_data/2,
@@ -77,333 +65,21 @@
     import/6,
     request/4,
     request/5,
-    graphql/1
+    get_token/1,
+    get_qs/1
 ]).
 
 -export([
-    get_objectid/2,
-    get_deviceid/2,
-    get_dictid/4,
-    get_viewid/4,
-    get_shapeid/2,
-    get_instruct/3,
-    get_roleid/1,
-    get_ruleid/1,
-    get_menuid/1,
-    get_productid/3,
-    get_maintenanceid/2,
-    get_articleid/2,
-    get_loglevelid/2,
-    get_sessionId/1,
-    get_userids/1,
-    get_roleids/1,
-    get_notificationid/1,
-    load_LogLevel/0,
-    get_evidenceId/2
+    request_rest/6,
+    get_header_token/2,
+    get_view_token/2
 ]).
-
--export([
-    test_graphql/0,
-    subscribe/2,
-    send_msg/3
-]).
-
-
-subscribe(Table, Method) ->
-    case dgiot_data:get({sub, Table, Method}) of
-        not_find ->
-            dgiot_data:insert({sub, Table, Method}, [self()]);
-        Acc ->
-            dgiot_data:insert({sub, Table, Method}, dgiot_utils:unique_2(Acc ++ [self()]))
-    end,
-    Fun = fun(Args) ->
-        case Args of
-            [_, Data, _Body] ->
-                dgiot_parse:send_msg(Table, Method, Data),
-                {ok, Data};
-            [_, _ObjectId, Data, _Body] ->
-                dgiot_parse:send_msg(Table, Method, Data),
-                {ok, Data};
-            _ ->
-                {ok, []}
-        end
-          end,
-    dgiot_hook:add(one_for_one, {Table, Method}, Fun).
-
-send_msg(Table, Method, Args) ->
-    Pids = lists:foldl(fun(Pid, Acc) ->
-        case is_process_alive(Pid) of
-            true ->
-                Pid ! {sync_parse, Args},
-                Acc ++ [Pid];
-            false ->
-                Acc
-        end
-                       end, [], dgiot_data:get({sub, Table, Method})),
-    dgiot_data:insert({sub, Table, Method}, Pids).
-
-get_shapeid(DeviceId, Identifier) ->
-    <<ShapeId:10/binary, _/binary>> = dgiot_utils:to_md5(<<DeviceId/binary, Identifier/binary, "dgiottopo">>),
-    ShapeId.
-
-get_dictid(Key, Type, Class, Title) ->
-    #{<<"objectId">> := DeviceId} =
-        dgiot_parse:get_objectid(<<"Dict">>, #{<<"key">> => Key, <<"type">> => Type, <<"class">> => Class, <<"title">> => Title}),
-    DeviceId.
-
-get_viewid(Key, Type, Class, Title) ->
-    #{<<"objectId">> := DeviceId} =
-        dgiot_parse:get_objectid(<<"View">>, #{<<"key">> => Key, <<"type">> => Type, <<"class">> => Class, <<"title">> => Title}),
-    DeviceId.
-
-get_deviceid(ProductId, DevAddr) ->
-    #{<<"objectId">> := DeviceId} =
-        dgiot_parse:get_objectid(<<"Device">>, #{<<"product">> => ProductId, <<"devaddr">> => DevAddr}),
-    DeviceId.
-
-get_instruct(DeviceId, Pn, Di) ->
-    <<DId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Instruct", DeviceId/binary, Pn/binary, Di/binary>>),
-    DId.
-
-get_roleid(Name) ->
-    <<DId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"_Role", Name/binary>>),
-    DId.
-
-get_ruleid(Name) ->
-    <<DId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Permission", Name/binary>>),
-    DId.
-
-get_menuid(Name) ->
-    <<DId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Menu", Name/binary>>),
-    DId.
-
-get_notificationid(Type) ->
-    UUID = dgiot_utils:guid(),
-    <<DId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Notification", Type/binary, UUID/binary>>),
-    DId.
-
-get_productid(Categoryid, DevType, Name) ->
-    <<Pid:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Product", Categoryid/binary, DevType/binary, Name/binary>>),
-    Pid.
-
-get_maintenanceid(Deviceid, Number) ->
-    <<Pid:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Maintenance", Deviceid/binary, Number/binary>>),
-    Pid.
-
-get_articleid(ProjectId, Timestamp) ->
-    <<Pid:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Article", ProjectId/binary, Timestamp/binary>>),
-    Pid.
-
-get_loglevelid(Name, Type) ->
-    <<Pid:10/binary, _/binary>> = dgiot_utils:to_md5(<<"LogLevel", Name/binary, Type/binary>>),
-    Pid.
-
-get_sessionId(SessionToken) ->
-    <<Pid:10/binary, _/binary>> = dgiot_utils:to_md5(<<"_Session", SessionToken/binary>>),
-    Pid.
-
-get_evidenceId(Ukey, TimeStamp) ->
-    <<EId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Evidence", Ukey/binary, TimeStamp/binary>>),
-    EId.
-
-get_objectid(Class, Map) ->
-    case Class of
-        <<"post_classes_session">> ->
-            get_objectid(<<"Session">>, Map);
-        <<"Session">> ->
-            SessionToken = maps:get(<<"sessionToken">>, Map, <<"">>),
-            <<Pid:10/binary, _/binary>> = dgiot_utils:to_md5(<<"_Session", SessionToken/binary>>),
-            Map#{
-                <<"objectId">> => Pid
-            };
-        <<"post_classes_article">> ->
-            get_objectid(<<"Article">>, Map);
-        <<"Article">> ->
-            Timestamp = maps:get(<<"timestamp">>, Map, <<"">>),
-            ProjectId = maps:get(<<"projectId">>, Map, <<"">>),
-            <<Pid:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Article", ProjectId/binary, Timestamp/binary>>),
-            Map#{
-                <<"objectId">> => Pid
-            };
-        <<"post_classes_maintenance">> ->
-            get_objectid(<<"Maintenance">>, Map);
-        <<"Maintenance">> ->
-            #{<<"objectId">> := Deviceid} = maps:get(<<"device">>, Map, <<"">>),
-            Number = maps:get(<<"number">>, Map, <<"">>),
-            <<Pid:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Maintenance", Deviceid/binary, Number/binary>>),
-            Map#{
-                <<"objectId">> => Pid
-            };
-        <<"post_classes_product">> ->
-            get_objectid(<<"Product">>, Map);
-        <<"Product">> ->
-            DevType = maps:get(<<"devType">>, Map, <<"">>),
-            Category = maps:get(<<"category">>, Map, <<"">>),
-            Categoryid = maps:get(<<"objectId">>, Category, <<"">>),
-            Name = maps:get(<<"name">>, Map, <<"">>),
-            <<Pid:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Product", Categoryid/binary, DevType/binary, Name/binary>>),
-            Map#{
-                <<"objectId">> => Pid
-            };
-        <<"post_classes_producttemplet">> ->
-            get_objectid(<<"ProductTemplet">>, Map);
-        <<"ProductTemplet">> ->
-            Category = maps:get(<<"category">>, Map, <<"">>),
-            Categoryid = maps:get(<<"objectId">>, Category, <<"">>),
-            Name = maps:get(<<"name">>, Map, <<"">>),
-            <<Pid:10/binary, _/binary>> = dgiot_utils:to_md5(<<"ProductTemplet", Categoryid/binary, Name/binary>>),
-            Map#{
-                <<"objectId">> => Pid
-            };
-        <<"post_classes_category">> ->
-            get_objectid(<<"Category">>, Map);
-        <<"Category">> ->
-            Level = dgiot_utils:to_binary(maps:get(<<"level">>, Map, 1)),
-            Name = maps:get(<<"name">>, Map, <<"">>),
-            <<Pid:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Category", Level/binary, Name/binary>>),
-            Map#{
-                <<"objectId">> => Pid
-            };
-        <<"post_classes_device">> ->
-            get_objectid(<<"Device">>, Map);
-        <<"Device">> ->
-            Product = case maps:get(<<"product">>, Map) of
-                          #{<<"objectId">> := ProductId} -> ProductId;
-                          ProductId1 -> ProductId1
-                      end,
-            DevAddr = maps:get(<<"devaddr">>, Map, <<"">>),
-            <<Did:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Device", Product/binary, DevAddr/binary>>),
-            Map#{
-                <<"objectId">> => Did
-            };
-        <<"post_classes_devicelog">> ->
-            get_objectid(<<"Devicelog">>, Map);
-        <<"Devicelog">> ->
-            Product = case maps:get(<<"product">>, Map) of
-                          #{<<"objectId">> := ProductId} -> ProductId;
-                          ProductId1 -> ProductId1
-                      end,
-            DevAddr = maps:get(<<"devaddr">>, Map, <<"">>),
-            Createtime = maps:get(<<"createtime">>, Map, <<"">>),
-            <<Did:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Device", Product/binary, DevAddr/binary, Createtime/binary>>),
-            Map#{
-                <<"objectId">> => Did
-            };
-        <<"post_classes_loglevel">> ->
-            get_objectid(<<"LogLevel">>, Map);
-        <<"LogLevel">> ->
-            Name = maps:get(<<"name">>, Map, <<"">>),
-            Type = maps:get(<<"type">>, Map, <<"">>),
-            <<Did:10/binary, _/binary>> = dgiot_utils:to_md5(<<"LogLevel", Name/binary, Type/binary>>),
-            Map#{
-                <<"objectId">> => Did
-            };
-        <<"post_classes_evidence">> ->
-            get_objectid(<<"Evidence">>, Map);
-        <<"Evidence">> ->
-            Ukey = maps:get(<<"ukey">>, Map, <<"">>),
-            TimeStamp = dgiot_utils:to_binary(maps:get(<<"timestamp">>, Map, <<"">>)),
-            <<EId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Evidence", Ukey/binary, TimeStamp/binary>>),
-            Map#{
-                <<"objectId">> => EId
-            };
-        <<"post_classes_channel">> ->
-            get_objectid(<<"Channel">>, Map);
-        <<"Channel">> ->
-            Name = maps:get(<<"name">>, Map, <<"">>),
-            Type = maps:get(<<"type">>, Map, <<"">>),
-            CType = maps:get(<<"cType">>, Map, <<"">>),
-            <<CId:10/binary, _/binary>> = dgiot_license:to_md5(<<"Channel", Type/binary, CType/binary, Name/binary>>),
-            Map#{
-                <<"objectId">> => CId
-            };
-        <<"post_classes_dict">> ->
-            get_objectid(<<"Dict">>, Map);
-        <<"Dict">> ->
-            Key = maps:get(<<"key">>, Map, <<"">>),
-            Type = maps:get(<<"type">>, Map, <<"">>),
-            Class1 = maps:get(<<"class">>, Map, <<"">>),
-            Title = maps:get(<<"title">>, Map, <<"">>),
-            <<DId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Dict", Class1/binary, Key/binary, Type/binary, Title/binary>>),
-            Map#{
-                <<"objectId">> => DId
-            };
-        <<"post_classes_view">> ->
-            get_objectid(<<"View">>, Map);
-        <<"View">> ->
-            Key = maps:get(<<"key">>, Map, <<"">>),
-            Type = maps:get(<<"type">>, Map, <<"">>),
-            Class2 = maps:get(<<"class">>, Map, <<"">>),
-            Title = maps:get(<<"title">>, Map, <<"">>),
-            <<VId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"View", Class2/binary, Key/binary, Type/binary, Title/binary>>),
-            Map#{
-                <<"objectId">> => VId
-            };
-        <<"post_classes_instruct">> ->
-            get_objectid(<<"Instruct">>, Map);
-        <<"Instruct">> ->
-            #{<<"objectId">> := DeviceId} = maps:get(<<"device">>, Map, #{<<"objectId">> => <<"">>}),
-            Pn = maps:get(<<"pn">>, Map, <<"">>),
-            Di = maps:get(<<"di">>, Map, <<"">>),
-            <<DId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Instruct", DeviceId/binary, Pn/binary, Di/binary>>),
-            Map#{
-                <<"objectId">> => DId
-            };
-        <<"post_classes_menu">> ->
-            get_objectid(<<"Menu">>, Map);
-        <<"Menu">> ->
-            Name = maps:get(<<"name">>, Map, <<"">>),
-            <<DId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Menu", Name/binary>>),
-            Map#{
-                <<"objectId">> => DId
-            };
-        <<"post_classes_permission">> ->
-            get_objectid(<<"Permission">>, Map);
-        <<"Permission">> ->
-            Name = maps:get(<<"name">>, Map, <<"">>),
-            <<DId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Permission", Name/binary>>),
-            Map#{
-                <<"objectId">> => DId
-            };
-        <<"post_classes_crond">> ->
-            get_objectid(<<"Crond">>, Map);
-        <<"Crond">> ->
-            Name = maps:get(<<"tid">>, Map, <<"">>),
-            <<DId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"Crond", Name/binary>>),
-            Map#{
-                <<"objectId">> => DId
-            };
-        <<"_Role">> ->
-            Name = maps:get(<<"name">>, Map, <<"">>),
-            <<DId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"_Role", Name/binary>>),
-            Map#{
-                <<"objectId">> => DId
-            };
-        <<"_User">> ->
-            Name = maps:get(<<"username">>, Map, <<"">>),
-            <<DId:10/binary, _/binary>> = dgiot_utils:to_md5(<<"_User", Name/binary>>),
-            Map#{
-                <<"objectId">> => DId
-            };
-        _ ->
-            Map
-    end.
-
 
 health() ->
     health(?DEFAULT).
 health(Name) ->
     Path = <<"/health">>,
     request_rest(Name, 'GET', [], Path, #{}, [{from, rest}]).
-
-%% 登录
-login(UserName, Password) ->
-    login(?DEFAULT, UserName, Password).
-login(Name, UserName, Password) ->
-    Path = <<"/login">>,
-    Args = #{<<"username">> => UserName, <<"password">> => Password},
-    request_rest(Name, 'GET', [], Path, Args, [{from, rest}]).
-
 
 %% 创建对象
 create_object(Class, Map) ->
@@ -417,7 +93,7 @@ create_object(Name, Class, #{<<"objectId">> := _ObjectId} = Map, Header, Options
     request_rest(Name, 'POST', Header, Path, Map, Options);
 create_object(Name, Class, Map, Header, Options) ->
     Path = <<"/classes/", Class/binary>>,
-    request_rest(Name, 'POST', Header, Path, get_objectid(Class, Map), Options).
+    request_rest(Name, 'POST', Header, Path, dgiot_parse_id:get_objectid(Class, Map), Options).
 
 
 %% 获取对象
@@ -454,6 +130,23 @@ batch(Requests, Header, Opts) ->
 batch(Name, Requests, Header, Opts) ->
     request_rest(Name, 'POST', Header, <<"/batch">>, #{<<"requests">> => Requests}, Opts).
 
+del_filed_schemas(Class, Fileds) ->
+    del_filed_schemas(?DEFAULT, Class, Fileds).
+%%
+del_filed_schemas(Name, Class, Fileds) ->
+    Path = <<"/schemas/", Class/binary>>,
+    NewFields = lists:foldl(
+        fun(X, Acc) ->
+            Acc#{X => #{<<"__op">> => <<"Delete">>}}
+        end, #{}, Fileds),
+
+    Method = <<"PUT">>,
+    Body = #{
+        <<"className">> => <<Class/binary>>,
+        <<"fields">> => NewFields,
+        <<"_method">> => Method
+    },
+    request_rest(Name, 'PUT', [], Path, Body, [{from, master}]).
 
 %% 创建表结构
 create_schemas(Fields) ->
@@ -494,7 +187,6 @@ set_class_level(Name, Class, Permissions) ->
     Body = #{<<"classLevelPermissions">> => Permissions},
     request_rest(Name, 'PUT', [], Path, Body, [{from, master}]).
 
-
 %% limit和skip参数进行分页
 %% 传递order逗号分隔列表按多个字段进行排序
 %% http://docs.parseplatform.org/rest/guide/#query-constraints
@@ -507,18 +199,6 @@ query_object(Class, Args, Header, Options) ->
 query_object(Name, Class, Args, Header, Options) ->
     Path = <<"/classes/", Class/binary>>,
     request_rest(Name, 'GET', Header, Path, Args, Options).
-
-graphql(Data) ->
-    Header =
-        case maps:get(<<"access_token">>, Data, <<"undefined">>) of
-            <<"undefined">> -> [];
-            Token -> [{"X-Parse-Session-Token", dgiot_utils:to_list(Token)}]
-        end,
-    ?LOG(info, "Header ~p", [Header]),
-    graphql(?DEFAULT, Header, maps:without([<<"access_token">>], Data)).
-graphql(Name, Header, Data) ->
-    request_rest(Name, 'POST', Header, <<"/graphql">>, Data, []).
-
 
 %% limit和skip参数进行分页
 %% 传递order逗号分隔列表按多个字段进行排序
@@ -552,112 +232,6 @@ del_table(Name, Class) ->
     Path = <<"/purge/", Class/binary>>,
     request_rest(Name, 'DELETE', [], Path, #{}, [{from, master}]).
 
-%% 创建触发器
-add_trigger(Class, TriggerName, Url) ->
-    add_trigger(?DEFAULT, Class, TriggerName, Url).
-add_trigger(Name, Class, TriggerName, Url) ->
-    true = lists:member(TriggerName, [<<"beforeSave">>, <<"beforeDelete">>, <<"afterSave">>, <<"afterDelete">>]),
-    Path = <<"/hooks/triggers">>,
-    Body = #{
-        <<"className">> => Class,
-        <<"triggerName">> => TriggerName,
-        <<"url">> => Url
-    },
-    request_rest(Name, 'POST', [], Path, Body, [{from, master}]).
-
-
-%% 获取触发器
-get_trigger() ->
-    get_trigger(?DEFAULT).
-get_trigger(Name) ->
-    Path = <<"/hooks/triggers">>,
-    request_rest(Name, 'GET', [], Path, #{}, [{from, master}]).
-get_trigger(Class, TriggerName) ->
-    get_trigger(?DEFAULT, Class, TriggerName).
-get_trigger(Name, Class, TriggerName) ->
-    Path = <<"/hooks/triggers/", Class/binary, "/", TriggerName/binary>>,
-    request_rest(Name, 'GET', [], Path, #{}, [{from, master}]).
-
-
-%% 更新触发器
-update_trigger(Class, TriggerName, Url) ->
-    update_trigger(?DEFAULT, Class, TriggerName, Url).
-update_trigger(Name, Class, TriggerName, Url) ->
-    Path = <<"/hooks/triggers/", Class/binary, "/", TriggerName/binary>>,
-    Body = #{<<"url">> => Url},
-    request_rest(Name, 'PUT', [], Path, Body, [{from, master}]).
-
-
-%% 删除触发器
-del_trigger() ->
-    case get_trigger() of
-        {ok, Results} ->
-            Fun =
-                fun(#{<<"className">> := Class}) ->
-                    del_trigger(Class)
-                end,
-            lists:foreach(Fun, Results);
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-del_trigger(Class) ->
-    del_trigger(?DEFAULT, Class).
-del_trigger(Name, Class) ->
-    lists:foreach(
-        fun(TriggerName) ->
-            del_trigger(Name, Class, TriggerName)
-        end, [<<"beforeSave">>, <<"beforeDelete">>, <<"afterSave">>, <<"afterDelete">>]).
-del_trigger(Name, Class, TriggerName) ->
-    Path = <<"/hooks/triggers/", Class/binary, "/", TriggerName/binary>>,
-    Body = #{<<"__op">> => <<"Delete">>},
-    request_rest(Name, 'PUT', [], Path, Body, [{from, master}]).
-
-
-add_all_trigger(Host) ->
-    add_all_trigger(?DEFAULT, Host).
-
-add_all_trigger(Name, Host) ->
-    case get_trigger(Name) of
-        {ok, Triggers} ->
-            NTrig = lists:foldl(
-                fun(Trigger, Acc) ->
-                    ClassName = maps:get(<<"className">>, Trigger),
-                    TriggerName = maps:get(<<"triggerName">>, Trigger),
-                    Url = maps:get(<<"url">>, Trigger),
-                    Acc#{<<ClassName/binary, "/", TriggerName/binary>> => Url}
-                end, #{}, Triggers),
-            case get_schemas(Name, <<>>) of
-                {ok, #{<<"results">> := Results}} ->
-                    Fun =
-                        fun
-                            (#{<<"className">> := Class}, Acc) when Class == <<"_Session">> ->
-                                Acc;
-                            (#{<<"className">> := Class}, Acc) ->
-                                lists:foldl(
-                                    fun(TriggerName, Acc1) ->
-                                        Path = <<Host/binary, "/hooks/parse_trigger/do?class=", Class/binary, "&name=", TriggerName/binary>>,
-                                        Key = <<Class/binary, "/", TriggerName/binary>>,
-                                        case maps:get(Key, NTrig, undefined) of
-                                            Path ->
-                                                Acc1;
-                                            _ ->
-                                                case add_trigger(Name, Class, TriggerName, Path) of
-                                                    {ok, _} ->
-                                                        [{Key, success} | Acc1];
-                                                    {error, Reason} ->
-                                                        ?LOG(error, "~p,~p~n", [Key, Reason]),
-                                                        [Reason | Acc1]
-                                                end
-                                        end
-                                    end, Acc, [<<"beforeSave">>, <<"beforeDelete">>, <<"afterSave">>, <<"afterDelete">>])
-                        end,
-                    lists:foldl(Fun, [], Results)
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
 read_page(Class, Query, Skip, PageSize) ->
     read_page(?DEFAULT, Class, Query, Skip, PageSize).
 read_page(Name, Class, Query, Skip, PageSize) ->
@@ -669,242 +243,10 @@ read_page(Name, Class, Query, Skip, PageSize) ->
             {ok, Page}
     end.
 
-%% 更新Session
-create_session(UserId, SessionToken, TTL) ->
-    create_session(?DEFAULT, UserId, SessionToken, TTL).
-create_session(Name, UserId, SessionToken, TTL) ->
-    case get_object(Name, <<"_User">>, binary:replace(UserId, <<" ">>, <<>>, [global])) of
-        {ok, #{<<"objectId">> := UserId} = UserInfo} ->
-            Now = dgiot_datetime:nowstamp() + dgiot_utils:to_int(TTL) - 8 * 60 * 60,
-            SessionId = dgiot_parse:get_sessionId(SessionToken),
-            Map = #{
-                <<"objectId">> => SessionId,
-                <<"sessionToken">> => SessionToken,
-                <<"restricted">> => false,
-                <<"installationId">> => <<>>,
-                <<"expiresAt">> => #{
-                    <<"__type">> => <<"Date">>,
-                    <<"iso">> => dgiot_datetime:format(Now, <<"YY-MM-DDTHH:NN:SS.000Z">>)
-                },
-                <<"user">> => #{
-                    <<"__type">> => <<"Pointer">>,
-                    <<"className">> => <<"_User">>,
-                    <<"objectId">> => UserId
-                },
-                <<"createdWith">> => #{
-                    <<"action">> => <<"login">>,
-                    <<"authProvider">> => <<"token">>
-                }
-            },
-            case create_object(Name, <<"_Session">>, Map) of
-                {ok, #{<<"objectId">> := _SessionId}} ->
-                    {ok, UserInfo#{<<"sessionToken">> => SessionToken}};
-                {error, Why} ->
-                    {error, Why}
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-check_session(Token) ->
-    check_session(?DEFAULT, Token).
-check_session(Name, Token) ->
-    Now = dgiot_datetime:nowstamp() - 8 * 60 * 60,
-    Where = #{
-        <<"objectId">> => #{
-            <<"$select">> => #{
-                <<"key">> => <<"user">>,
-                <<"query">> => #{
-                    <<"className">> => <<"_Session">>,
-                    <<"where">> => #{
-                        <<"sessionToken">> => Token,
-                        <<"expiresAt">> => #{
-                            <<"$gte">> => #{
-                                <<"__type">> => <<"Date">>,
-                                <<"iso">> => dgiot_datetime:format(Now, <<"YY-MM-DDTHH:NN:SS.000Z">>)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    },
-    case query_object(Name, <<"_User">>, #{<<"where">> => Where, <<"limit">> => 1}) of
-        {ok, #{<<"results">> := [User]}} ->
-            {ok, User};
-        {ok, #{<<"results">> := []}} ->
-            {error, #{<<"code">> => 101, <<"error">> => <<"Object not found.">>}};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-refresh_session(Token) ->
-    SessionId = get_sessionId(Token),
-    Now = dgiot_datetime:nowstamp() + dgiot_auth:ttl(),
-    dgiot_parse:update_object(<<"_Session">>, SessionId, #{
-        <<"expiresAt">> => #{
-            <<"__type">> => <<"Date">>,
-            <<"iso">> => dgiot_datetime:format(Now, <<"YY-MM-DDTHH:NN:SS.000Z">>)
-        }
-    }).
-
-
-%% 查取角色
-get_role(UserId, SessionToken) ->
-    get_role(?DEFAULT, UserId, SessionToken).
-get_role(Name, UserId, SessionToken) ->
-    Query = #{
-        <<"keys">> => [<<"name">>, <<"alias">>, <<"org_type">>, <<"tag">>],
-        <<"where">> => #{
-            <<"users">> => #{
-                <<"className">> => <<"_User">>,
-                <<"objectId">> => UserId,
-                <<"__type">> => <<"Pointer">>
-            }
-        }
-    },
-    case query_object(Name, <<"_Role">>, Query) of
-        {ok, #{<<"results">> := RoleResults}} ->
-            Roles =
-                lists:foldr(
-                    fun(#{<<"objectId">> := RoleId, <<"name">> := Name1, <<"alias">> := Alias, <<"org_type">> := Org_type} = X, Acc) ->
-                        Role = #{<<"objectId">> => RoleId, <<"name">> => Name1, <<"alias">> => Alias, <<"org_type">> => Org_type, <<"tag">> => maps:get(<<"tag">>, X, #{})},
-                        Acc#{RoleId => Role}
-                    end, #{}, RoleResults),
-            RoleIds =
-                lists:foldr(
-                    fun(#{<<"objectId">> := RoleId}, Acc) ->
-                        Acc ++ [RoleId]
-                    end, [], RoleResults),
-            case get_rules(Name, RoleIds, SessionToken) of
-                {ok, Rules} ->
-                    case get_menus(Name, RoleIds, SessionToken) of
-                        {ok, Menus} ->
-                            Info = #{
-                                <<"rules">> => Rules,
-                                <<"roles">> => Roles,
-                                <<"menus">> => Menus
-                            },
-                            {ok, Info};
-                        {error, Reason1} ->
-                            {error, Reason1}
-                    end;
-                {error, Reason} ->
-                    {error, Reason}
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-
-%% 根据角色获取API权限
-get_rules(Name, RoleIds, SessionToken) ->
-    Requests = [#{
-        <<"method">> => <<"GET">>,
-        <<"path">> => <<"/classes/Permission">>,
-        <<"body">> => #{
-            <<"keys">> => [<<"name">>],
-            <<"where">> => #{
-                <<"$relatedTo">> => #{
-                    <<"key">> => <<"rules">>,
-                    <<"object">> => #{
-                        <<"__type">> => <<"Pointer">>,
-                        <<"className">> => <<"_Role">>,
-                        <<"objectId">> => RoleId
-                    }
-                }
-            }
-        }
-    } || RoleId <- RoleIds],
-    case dgiot_parse:batch(Name, Requests, [{"X-Parse-Session-Token", binary_to_list(SessionToken)}], [{from, rest}]) of
-        {ok, Results1} ->
-            {ok, lists:foldr(
-                fun(#{<<"success">> := #{<<"results">> := R}}, Acc1) ->
-                    lists:foldr(fun(#{<<"name">> := Name1}, Acc2) ->
-                        case lists:member(Name, Acc2) of
-                            true ->
-                                Acc2;
-                            false ->
-                                [Name1 | Acc2]
-                        end
-                                end, Acc1, R)
-                end, [], Results1)};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-%% 根据角色获取菜单权限
-get_menus(Name, RoleIds, SessionToken) ->
-    Requests = [#{
-        <<"method">> => <<"GET">>,
-        <<"path">> => <<"/classes/Menu">>,
-        <<"body">> => #{
-            <<"keys">> => [<<"name">>],
-            <<"where">> => #{
-                <<"$relatedTo">> => #{
-                    <<"key">> => <<"menus">>,
-                    <<"object">> => #{
-                        <<"__type">> => <<"Pointer">>,
-                        <<"className">> => <<"_Role">>,
-                        <<"objectId">> => RoleId
-                    }
-                }
-            }
-        }
-    } || RoleId <- RoleIds],
-    case dgiot_parse:batch(Name, Requests, [{"X-Parse-Session-Token", binary_to_list(SessionToken)}], [{from, rest}]) of
-        {ok, Results1} ->
-            {ok, lists:foldr(
-                fun(#{<<"success">> := #{<<"results">> := R}}, Acc1) ->
-                    lists:foldr(fun(#{<<"name">> := Name1}, Acc2) ->
-                        case lists:member(Name, Acc2) of
-                            true ->
-                                Acc2;
-                            false ->
-                                [Name1 | Acc2]
-                        end
-                                end, Acc1, R)
-                end, [], Results1)};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-add_to_role(Info, Field, Class, ObjectIds) ->
-    add_to_role(?DEFAULT, Info, Field, Class, ObjectIds).
-
-add_to_role(Name, #{<<"objectId">> := RoleId} = Info, Field, Class, ObjectIds) ->
-    Users = [#{
-        <<"__type">> => <<"Pointer">>,
-        <<"className">> => Class,
-        <<"objectId">> => ObjectId
-    } || ObjectId <- ObjectIds],
-    case update_object(Name, <<"_Role">>, RoleId, Info#{Field => #{
-        <<"__op">> => <<"AddRelation">>,
-        <<"objects">> => Users
-    }}) of
-        {ok, #{<<"updatedAt">> := _}} ->
-            ok;
-        {error, Reason} ->
-            {error, Reason}
-    end;
-add_to_role(Name, #{<<"name">> := <<"role:", RoleName/binary>>} = Role, Field, Class, ObjectIds) ->
-    add_to_role(Name, Role#{<<"name">> => RoleName}, Field, Class, ObjectIds);
-add_to_role(Name, #{<<"name">> := RoleName} = Role, Field, Class, ObjectIds) ->
-    case query_object(Name, <<"_Role">>, #{<<"where">> => #{<<"name">> => RoleName}}) of
-        {ok, #{<<"results">> := []}} ->
-            {error, #{error => <<"Role: ", RoleName/binary, " not find!">>}};
-        {ok, #{<<"results">> := [#{<<"objectId">> := RoleId}]}} ->
-            Info = maps:without([<<"name">>], Role),
-            add_to_role(Name, Info#{<<"objectId">> => RoleId}, Field, Class, ObjectIds);
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
 import(Class, Datas, Count, Fun, Acc) ->
     import(?DEFAULT, Class, Datas, Count, Fun, Acc).
 
 import(Name, Class, {json, Path}, Count, Fun, Acc) ->
-    ?LOG(info, "~p import to ~p:~p~n", [Name, Class, Path]),
     case file:read_file(Path) of
         {ok, Bin} ->
             case catch jsx:decode(Bin, [{labels, binary}, return_maps]) of
@@ -949,6 +291,63 @@ import(Name, Class, [Data | Other], Count, Requests, Fun, Acc) when length(Reque
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+get_token(Header) ->
+    case proplists:get_value("X-Parse-Session-Token", Header) of
+        undefined ->
+            proplists:get_value(<<"X-Parse-Session-Token">>, Header);
+        Token1 ->
+            Token1
+    end.
+
+get_header_token(<<"/classes/_Role", _/binary>>, Header) ->
+    Header;
+
+get_header_token(<<"/classes/_User", _/binary>>, Header) ->
+    Header;
+
+get_header_token(<<"/classes/_Session", _/binary>>, Header) ->
+    Header;
+
+get_header_token(_, Header) ->
+    lists:foldl(
+        fun
+            ({<<"X-Parse-Session-Token">>, Token}, Acc) ->
+                DepartToken = dgiot_parse_auth:get_depart_session(Token),
+                Acc ++ [{<<"X-Parse-Session-Token">>, DepartToken}];
+            ({"X-Parse-Session-Token", Token}, Acc) ->
+                DepartToken = dgiot_parse_auth:get_depart_session(Token),
+                Acc ++ [{<<"X-Parse-Session-Token">>, DepartToken}];
+            ({K, V}, Acc) ->
+                Acc ++ [{K, V}]
+        end, [], Header).
+
+get_view_token(Header, ViewId) ->
+    UserToken =
+        case proplists:get_value("X-Parse-Session-Token", Header) of
+            undefined ->
+                proplists:get_value(<<"X-Parse-Session-Token">>, Header);
+            Token1 ->
+                Token1
+        end,
+    dgiot_parse_auth:put_view_session(UserToken, ViewId).
+
+get_qs(Map) ->
+    lists:foldl(
+        fun
+            ({N, V}, <<>>) ->
+                NewV = format_value(V),
+                <<"?", N/binary, "=", NewV/binary>>;
+            ({N, V}, Acc) ->
+                NewV = format_value(V),
+                <<Acc/binary, "&", N/binary, "=", NewV/binary>>
+        end, <<>>, maps:to_list(Map)).
+
+format_value(V) when is_binary(V) ->
+    dgiot_httpc:urlencode(V);
+format_value(V) ->
+    Json = dgiot_json:encode(V),
+%%    V1 = re:replace(Json, <<"\[.*?\]">>, <<"">>, [global, {return, binary}, unicode]),
+    dgiot_httpc:urlencode(Json).
 
 read_file(Path) ->
     case file:read_file(Path) of
@@ -968,7 +367,7 @@ format_data(<<"Dict">>, Data) ->
     NewData =
         case Data of
             #{<<"key">> := _} -> Data;
-            _ -> Data#{<<"key">> => dgiot_utils:to_md5(jsx:encode(Data))}
+            _ -> Data#{<<"key">> => dgiot_utils:to_md5(dgiot_json:encode(Data))}
         end,
     maps:fold(
         fun(Key, Value, Acc) ->
@@ -1008,6 +407,7 @@ format_value(_Class, _Key, #{<<"__type">> := <<"Pointer">>, <<"className">> := C
         {error, Reason} ->
             {error, Reason}
     end;
+
 format_value(Class, Key, #{<<"__op">> := <<"AddRelation">>, <<"objects">> := Objects}) ->
     Fun =
         fun(ClassName, ObjectId) ->
@@ -1054,7 +454,8 @@ format_value(_Class, _Key, Value) ->
 
 %% Rest请求
 request_rest(Name, Method, Header, Path, Body, Options) ->
-    handle_response(request(Name, Method, Header, Path, Body, Options)).
+    Response = request(Name, Method, Header, Path, Body, Options),
+    handle_response(Response).
 request(Method, Header, Path, Options) ->
     request(Method, Header, Path, <<>>, Options).
 request(Method, Header, Path0, Body, Options) ->
@@ -1110,7 +511,7 @@ init_database(Name, Dirs, Op) when Op == merge; Op == delete ->
                                 Acc#{Class => Tab#{<<"fields">> => Fields}}
                         end
                     end, #{}, OldSchemas1),
-            file:write_file("data/db.schema", jsx:encode(maps:values(OldSchemas))),
+            file:write_file("data/db.schema", dgiot_json:encode(maps:values(OldSchemas))),
             Schemas = get_tables(Dirs),
             init_tables(Name, OldSchemas, Schemas, Op);
         {error, Reason} ->
@@ -1166,21 +567,22 @@ init_tables(Name, OldSchemas, Schemas, Op) ->
 
 merge_table(Name, Class, NewFields, OldFields) ->
     maps:fold(
-        fun(Key, Type, {Targets, Acc}) ->
-            case maps:get(Key, NewFields, no) of
-                no ->
-                    {Targets, Acc#{Key => #{<<"__op">> => <<"Delete">>}}};
-                Type ->
-                    {Targets, maps:without([Key], Acc)};
-                NewType ->
-                    update_schemas(Name, #{<<"className">> => Class, <<"fields">> => #{Key => #{<<"__op">> => <<"Delete">>}}}),
-                    case is_map(Type) andalso maps:get(<<"targetClass">>, NewType, false) of
-                        false ->
-                            {Targets, Acc};
-                        TargetClass ->
-                            {Targets#{TargetClass => true}, Acc}
-                    end
-            end
+        fun
+            (Key, Type, {Targets, Acc}) ->
+                case maps:get(Key, NewFields, no) of
+                    no ->
+                        {Targets, Acc#{Key => #{<<"__op">> => <<"Delete">>}}};
+                    Type ->
+                        {Targets, maps:without([Key], Acc)};
+                    NewType ->
+                        update_schemas(Name, #{<<"className">> => Class, <<"fields">> => #{Key => #{<<"__op">> => <<"Delete">>}}}),
+                        case is_map(Type) andalso maps:get(<<"targetClass">>, NewType, false) of
+                            false ->
+                                {Targets, Acc};
+                            TargetClass ->
+                                {Targets#{TargetClass => true}, Acc}
+                        end
+                end
         end, {#{}, NewFields}, OldFields).
 
 
@@ -1214,238 +616,4 @@ handle_response(Result) ->
             {error, #{<<"code">> => Code, <<"error">> => Reason}};
         {error, Reason} ->
             {error, #{<<"code">> => 1, <<"error">> => Reason}}
-    end.
-
-
-test_graphql() ->
-    Data = #{
-        <<"operationName">> => <<"Health">>,
-        <<"variables">> => #{},
-        <<"query">> => <<"query Health {\n  health\n}\n">>
-    },
-%%    {"operationName":"Health","variables":{},"query":"query Health {\n  health\n}\n"}
-    graphql(Data).
-
-load_role() ->
-    Success = fun(Page) ->
-        lists:map(fun(X) ->
-            #{<<"objectId">> := RoleId, <<"parent">> := #{<<"objectId">> := ParentId}} = X,
-            dgiot_data:insert(?ROLE_PARENT_ETS, RoleId, ParentId),
-            role_ets(RoleId)
-                  end, Page)
-              end,
-    Query = #{<<"keys">> => <<"parent">>},
-    dgiot_parse_loader:start(<<"_Role">>, Query, 0, 10, 10000, Success).
-
-role_ets(RoleId) ->
-    UsersQuery =
-        #{<<"keys">> => <<"objectId">>,
-            <<"where">> => #{<<"$relatedTo">> => #{
-                <<"object">> => #{
-                    <<"__type">> => <<"Pointer">>,
-                    <<"className">> => <<"_Role">>,
-                    <<"objectId">> => RoleId},
-                <<"key">> => <<"users">>}
-            }},
-    case dgiot_parse:query_object(<<"_User">>, UsersQuery) of
-        {ok, #{<<"results">> := Users}} when length(Users) > 0 ->
-            UserIds =
-                lists:foldl(fun(#{<<"objectId">> := UserId}, Acc) ->
-                    save_RoleIds(UserId, RoleId),
-                    Acc ++ [UserId]
-                            end, [], Users),
-            dgiot_data:insert(?ROLE_USER_ETS, RoleId, UserIds);
-        _ -> pass
-    end.
-
-save_RoleIds(UserId, RoleId) ->
-    case dgiot_data:get(?USER_ROLE_ETS, UserId) of
-        not_find ->
-            dgiot_data:insert(?USER_ROLE_ETS, UserId, [RoleId]);
-        RoleIds ->
-            New_RoleIds = dgiot_utils:unique_2(RoleIds ++ [RoleId]),
-            dgiot_data:insert(?USER_ROLE_ETS, UserId, New_RoleIds)
-    end.
-
-
-save_User_Role(UserId, RoleId) ->
-    case dgiot_data:get(?USER_ROLE_ETS, UserId) of
-        not_find ->
-            dgiot_data:insert(?USER_ROLE_ETS, UserId, [RoleId]);
-        RoleIds ->
-            New_RoleIds = dgiot_utils:unique_2(RoleIds ++ [RoleId]),
-            dgiot_data:insert(?USER_ROLE_ETS, UserId, New_RoleIds)
-    end,
-
-    case dgiot_data:get(?ROLE_USER_ETS, RoleId) of
-        not_find ->
-            dgiot_data:insert(?ROLE_USER_ETS, RoleId, [UserId]);
-        UserIds ->
-            New_UserIds = dgiot_utils:unique_2(UserIds ++ [UserId]),
-            dgiot_data:insert(?ROLE_USER_ETS, RoleId, New_UserIds)
-    end.
-
-
-del_User_Role(UserId, RoleId) ->
-    case dgiot_data:get(?USER_ROLE_ETS, UserId) of
-        not_find ->
-            pass;
-        RoleIds when length(RoleIds) > 0 ->
-            dgiot_data:delete(?USER_ROLE_ETS, UserId);
-        _ ->
-            pass
-    end,
-    case dgiot_data:get(?ROLE_USER_ETS, RoleId) of
-        not_find ->
-            pass;
-        UserIds when length(UserIds) > 0 ->
-            New_UserIds = lists:delete(UserId, UserIds),
-            dgiot_data:insert(?ROLE_USER_ETS, RoleId, New_UserIds);
-        _ ->
-            pass
-    end.
-
-put_User_Role(UserId, OldRoleId, NewRoleId) ->
-    case dgiot_data:get(?USER_ROLE_ETS, UserId) of
-        not_find ->
-            pass;
-        RoleIds when length(RoleIds) > 0 ->
-            Old_RoleIds = lists:delete(OldRoleId, RoleIds),
-            New_RoleIds = dgiot_utils:unique_2(Old_RoleIds ++ [NewRoleId]),
-            dgiot_data:insert(?USER_ROLE_ETS, UserId, New_RoleIds);
-        _ ->
-            pass
-    end,
-    case dgiot_data:get(?ROLE_USER_ETS, OldRoleId) of
-        not_find ->
-            pass;
-        OldUserIds when length(OldUserIds) > 0 ->
-            Old_UserIds = lists:delete(UserId, OldUserIds),
-            dgiot_data:insert(?ROLE_USER_ETS, OldRoleId, Old_UserIds);
-        _ ->
-            pass
-    end,
-    case dgiot_data:get(?ROLE_USER_ETS, NewRoleId) of
-        not_find ->
-            pass;
-        NewUserIds when length(NewUserIds) > 0 ->
-            New_UserIds = dgiot_utils:unique_2(NewUserIds ++ [UserId]),
-            dgiot_data:insert(?ROLE_USER_ETS, NewRoleId, New_UserIds);
-        _ ->
-            pass
-    end.
-
-get_userids(Roleid) ->
-    case dgiot_data:get(?ROLE_USER_ETS, Roleid) of
-        not_find ->
-            [];
-        UserIds when length(UserIds) > 0 ->
-            UserIds;
-        _ ->
-            []
-    end.
-
-
-get_roleids(Userid) ->
-    case dgiot_data:get(user_role_ets, Userid) of
-        not_find ->
-            [];
-        RoleIds when length(RoleIds) > 0 ->
-            RoleIds;
-        _ ->
-            []
-    end.
-
-load_LogLevel() ->
-    Level = emqx_logger:get_primary_log_level(),
-    case create_logconfig(Level, <<"0">>, <<"dgiot">>, <<"system">>, 0, <<"logger_trace/log/#">>) of
-        {ok, #{<<"objectId">> := DgiotlogId}} ->
-            create_logconfig(Level, DgiotlogId, <<"dgiot_handle">>, <<"dgiot_handle">>, 2, <<"logger_trace/trace/#">>),
-            case create_logconfig(Level, DgiotlogId, <<"dgiot_app">>, <<"dgiot_app">>, 1, <<"logger_trace/log/#">>) of
-                {ok, #{<<"objectId">> := ApplogId}} ->
-                    create_applog(ApplogId);
-                _ ->
-                    pass
-            end;
-        _Ot ->
-            pass
-    end.
-
-create_applog(DgiotlogId) ->
-    Apps = application:loaded_applications(),
-    lists:foldl(fun({Appname, _, _}, Acc) ->
-        BinAppname = atom_to_binary(Appname),
-        case BinAppname of
-            <<"dgiot_", _/binary>> ->
-                case create_logconfig(<<"info">>, DgiotlogId, BinAppname, <<"app">>, Acc, <<"logger_trace/log/", BinAppname/binary, "/#">>) of
-                    {ok, #{<<"objectId">> := ApplogId}} ->
-                        AppPath = code:lib_dir(Appname) ++ "/ebin",
-                        case file:list_dir_all(AppPath) of
-                            {ok, Modules} ->
-                                lists:foldl(fun(Mod, Mods) ->
-                                    BinMod = dgiot_utils:to_binary(Mod),
-                                    case binary:split(BinMod, <<$.>>, [global, trim]) of
-                                        [Module, <<"beam">>] ->
-                                            AtomMod = binary_to_atom(Module),
-                                            Modlevel =
-                                                case logger:get_module_level(AtomMod) of
-                                                    [{AtomMod, Level} | _] ->
-                                                        Level;
-                                                    _ ->
-                                                        <<"debug">>
-                                                end,
-                                            case create_logconfig(Modlevel, ApplogId, Module, <<"module">>, Mods, <<"logger_trace/log/", Module/binary, "/#">>) of
-                                                {ok, #{<<"objectId">> := ModlogId}} ->
-                                                    Functions = AtomMod:module_info(exports),
-                                                    lists:foldl(fun({Fun, Num}, Funs) ->
-                                                        BinFun = dgiot_utils:to_binary(Fun),
-                                                        BinNum = dgiot_utils:to_binary(Num),
-                                                        create_logconfig(Modlevel, ModlogId, <<BinFun/binary, "/", BinNum/binary>>, <<"function">>, Funs, <<"logger_trace/log/", Module/binary, "/", BinFun/binary, "/", BinNum/binary, "/#">>),
-                                                        Funs + 1
-                                                                end, 1, Functions);
-                                                _ ->
-                                                    Mods
-                                            end,
-                                            Mods + 1;
-                                        _ ->
-                                            Mods
-                                    end
-                                            end, 1, Modules);
-                            _Ot ->
-                                ?LOG(info, "_Ot ~p", [_Ot]),
-                                Acc
-                        end;
-                    _ ->
-                        Acc
-                end,
-                Acc + 1;
-            _ ->
-                Acc
-        end
-                end, 1, Apps).
-
-create_logconfig(Level, Parent, Name, Type, Order, Topic) ->
-    create_loglevel(#{
-        <<"level">> => Level,
-        <<"parent">> => #{
-            <<"__type">> => <<"Pointer">>,
-            <<"className">> => <<"LogLevel">>,
-            <<"objectId">> => Parent
-        },
-        <<"name">> => Name,
-        <<"type">> => Type,
-        <<"order">> => Order,
-        <<"topic">> => Topic
-    }).
-
-create_loglevel(LogLevel) ->
-    Name1 = maps:get(<<"name">>, LogLevel),
-    Type1 = maps:get(<<"type">>, LogLevel),
-    LoglevelId = dgiot_parse:get_loglevelid(Name1, Type1),
-    case dgiot_parse:get_object(<<"LogLevel">>, LoglevelId) of
-        {ok, #{<<"objectId">> := LoglevelId, <<"type">> := Type, <<"name">> := Name, <<"level">> := Level}} ->
-            dgiot_logger:set_loglevel(Type, Name, Level),
-            {ok, #{<<"objectId">> => LoglevelId}};
-        _ ->
-            dgiot_parse:create_object(<<"LogLevel">>, LogLevel)
     end.

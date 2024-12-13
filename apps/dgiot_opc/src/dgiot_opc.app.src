@@ -3,11 +3,11 @@
         {vsn, "4.3.0"},
         {modules, []},
         {registered, [dgiot_opc_sup]},
-        {applications, [kernel, stdlib, dgiot]},
+        {applications, [kernel, stdlib, dgiot, opcua]},
         {mod, {dgiot_opc_app, []}},
         {licenses, ["Apache-2.0"]},
-        {maintainers, ["DG-IoT Team"]},
-        {links, [{"Homepage", "https://www.iotn2n.com/"},
+        {maintainers, ["DGIOT Team"]},
+        {links, [{"Homepage", "https://www.dgiotcloud.cn/"},
             {"Github", "https://github.com/dgiot/dgiot"}
         ]}
     ]

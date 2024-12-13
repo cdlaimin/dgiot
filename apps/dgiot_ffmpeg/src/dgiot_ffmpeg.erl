@@ -78,7 +78,7 @@ push_live(Interval, IPCUSER, IPCPWD, IP, PARAM, Mac, Push, PushKey, PlayUrl, Rep
     dgiot_evidence:post(#{
         <<"id">> => ReportId,
         <<"scene">> => App,
-        <<"md5">> => dgiot_license:to_md5(jsx:encode(Data)),
+        <<"md5">> => dgiot_utils:to_md5(dgiot_json:encode(Data)),
         <<"original">> => #{
             <<"data">> => Data,
             <<"datatype">> => <<"liveMonitor">>,
@@ -102,7 +102,7 @@ push_screenlive(Interval, PARAM, Mac, Push, PushKey, PlayUrl, ReportId, App, Ses
     dgiot_evidence:post(#{
         <<"id">> => ReportId,
         <<"scene">> => App,
-        <<"md5">> => dgiot_utils:to_md5(jsx:encode(Data)),
+        <<"md5">> => dgiot_utils:to_md5(dgiot_json:encode(Data)),
         <<"original">> => #{
             <<"data">> => Data,
             <<"datatype">> => <<"liveMonitor">>,
@@ -172,7 +172,7 @@ scan_ipc(#{
     <<"IPCTYPE">> := _IPCTYPE,
     <<"ACL">> := _Acl}) ->
     ok.
-%%    Thing = dgiot_license:load_config(?MODULE, "ffmpeg_thing"),
+%%    Thing = dgiot_utils:load_config(?MODULE, "ffmpeg_thing"),
 %%    Topo = dgiot_license:load_config(?MODULE, "ffmpeg_topo"),
 %%    windows_capture:update_config(#{
 %%        <<"name">> => <<IPCMAC/binary>>,
@@ -194,7 +194,7 @@ create_scr_device(#{
     SCREENADDR = <<"SCR_", GWAddr/binary>>,
     {_, #{<<"objectId">> := ProductId}} =
         scan_ipc(Env#{<<"IPCMAC">> => SCREENADDR}),
-    {_, #{<<"objectId">> := DeviceId1}} = dgiot_device:create_device(#{
+    dgiot_device:create_device(#{
         <<"status">> => <<"ONLINE">>,
         <<"devaddr">> => SCREENADDR,
         <<"name">> => SCREENADDR,
@@ -208,8 +208,7 @@ create_scr_device(#{
             <<"className">> => <<"Device">>,
             <<"objectId">> => GwDeviceId
         }
-    }),
-    create_instruct(Acl, ProductId, DeviceId1, SCREENADDR).
+    }).
 
 create_ipc_device(#{
     <<"IPCMAC">> := Mac,
@@ -229,8 +228,7 @@ create_ipc_device(#{
                 DevAddr = <<"IPC_", IPCMAC/binary>>,
                 {_, #{<<"objectId">> := ProductId}} =
                     scan_ipc(Env#{<<"IPCMAC">> => DevAddr}),
-                dgiot_product:load(ProductId),
-                {_, #{<<"objectId">> := DeviceId}} =
+                {_, #{<<"objectId">> := _DeviceId}} =
                     dgiot_device:create_device(#{
                         <<"status">> => <<"ONLINE">>,
                         <<"devaddr">> => DevAddr,
@@ -247,7 +245,6 @@ create_ipc_device(#{
                             <<"objectId">> => GwDeviceId
                         }
                     }),
-                create_instruct(Acl, ProductId, DeviceId, DevAddr),
                 Acc#{DevAddr => IPCIP}
         end
                 end, #{}, MacList).
@@ -262,28 +259,6 @@ get_ipc(DtuAddr) ->
         end
                 end, #{}, dgiot_device:get_sub_device(DtuAddr)).
 
-create_instruct(ACL, ProductId, DeviceId, DevAddr) ->
-    case dgiot_product:lookup_prod(ProductId) of
-        {ok, #{<<"thing">> := Thing}} ->
-            #{<<"properties">> := Props} = Thing,
-            NewProps =
-                lists:foldl(fun(X, Acc) ->
-                    case X of
-                        #{<<"name">> := <<"点播地址"/utf8>>,
-                            <<"dataForm">> := DataForm} ->
-                            #{<<"dataForm">> := DataForm} = X,
-                            Acc ++ [X#{<<"dataForm">> => DataForm#{<<"address">> => <<DevAddr/binary, "/VIDEO">>}}];
-                        _ -> Acc
-                    end
-                            end, [], Props),
-            Pn = <<DevAddr/binary, "/FFMPEG">>,
-            Topic = <<"thing/", ProductId/binary, "/", DevAddr/binary, "/", Pn/binary>>,
-            dgiot_mqtt:subscribe(Topic),
-            dgiot_instruct:create(ProductId, DeviceId, Pn, ACL, <<"all">>, Thing#{
-                <<"properties">> => NewProps
-            });
-        _ -> pass
-    end.
 
 get_path(DevAddr) ->
     {file, Here} = code:is_loaded(?MODULE),
@@ -319,7 +294,7 @@ upload(#{
                     end;
                 false -> {640, 480}
             end,
-        case dgiot_evidence:upload(Path, App, dgiot_parse_handler:get_token(App)) of
+        case dgiot_evidence:upload(Path, App, dgiot_parse_auth:get_token(App)) of
             {ok, #{<<"md5">> := Md5} = Data} ->
                 NewData = maps:without([<<"md5">>, <<"retmsg">>, <<"retcode">>, <<"path">>,
                     <<"scene">>, <<"url">>, <<"domain">>], Data),
@@ -335,8 +310,8 @@ upload(#{
 
                 dgiot_tdengine_adapter:save(Product, DevAddr, Ack),
                 NewTopic = <<"thing/", Product/binary, "/", DevAddr/binary, "/post">>,
-                dgiot_bridge:send_log(ChannelId, "to_task: ~p: ~p", [NewTopic, jsx:encode(Ack)]),
-%%                dgiot_mqtt:publish(DevAddr, NewTopic, jsx:encode(Ack)),
+                dgiot_bridge:send_log(ChannelId, "to_task: ~p: ~p", [NewTopic, dgiot_json:encode(Ack)]),
+%%                dgiot_mqtt:publish(DevAddr, NewTopic, dgiot_json:encode(Ack)),
                 case maps:find(<<"reportId">>, Appdata) of
                     {ok, ReportId} ->
                         dgiot_evidence:post(#{
@@ -353,7 +328,7 @@ upload(#{
                                 },
                                 <<"datatype">> => <<"video">>,
                                 <<"sourcetype">> => DevAddr},
-                            <<"sessionToken">> => dgiot_parse_handler:get_token(App)});
+                            <<"sessionToken">> => dgiot_parse_auth:get_token(App)});
                     _ -> pass
                 end;
             Error -> Error

@@ -18,9 +18,45 @@
 -author("johnliu").
 -include("dgiot_parse.hrl").
 -include_lib("dgiot/include/logger.hrl").
-
+-dgiot_data("ets").
+-export([test/0, init_ets/0, start_cache/1, cache_classes/0]).
 -export([do_save/1, save_to_cache/1, save_to_cache/2, save_test/1]).
 
+init_ets() ->
+    dgiot_data:init(?DGIOT_PARSE_ETS),
+    dgiot_data:init(?ROLE_ETS),
+    dgiot_data:init(?USER_ETS),
+    dgiot_data:init(?ROLE_USER_ETS),
+    dgiot_data:init(?USER_ROLE_ETS),
+    dgiot_data:init(?ROLE_VIEWS_ETS),
+    dgiot_data:init(?ROLE_MENUVIEWS_ETS),
+    dgiot_data:init(?ROLE_PARENT_ETS),
+    dgiot_data:init(?NAME_ROLE_ETS),
+    dgiot_data:init(?ROLE_NAME_ETS),
+    dgiot_data:init(?CLASS_COUNT_ETS),
+    dgiot_data:init(?PARENT_ROLE_ETS, [public, named_table, bag, {write_concurrency, true}, {read_concurrency, true}]).
+
+start_cache(_Pid) ->
+    dgiot_role:load_roles(),
+    dgiot_role:load_user(),
+    dgiot_parse_auth:load_roleuser().
+%%    cache_classes().
+
+%% todo
+cache_classes() ->
+    case dgiot_parse:get_schemas() of
+        {ok, #{<<"results">> := Results}} ->
+            lists:map(fun(#{<<"className">> := CLasseName}) ->
+                case catch dgiot_hook:run_hook(dgiot_utils:to_atom("parse_cache_" ++ dgiot_utils:to_list(CLasseName)), CLasseName) of
+                    {ok, _} ->
+                        pass;
+                    _ ->
+                        pass
+                end
+                      end, Results);
+        _ ->
+            pass
+    end.
 
 %% 先缓存定时存库
 save_to_cache(Requests) ->
@@ -36,7 +72,6 @@ save_to_cache(Channel, Requests) when is_list(Requests) ->
     end;
 save_to_cache(Channel, Request) when is_map(Request) ->
     save_to_cache(Channel, [Request]).
-
 
 check_cache(Channel) ->
     Info = dgiot_dcache:info(?CACHE(Channel)),
@@ -71,14 +106,13 @@ do_save(Idx, Channel, Requests, Acc) ->
 
 save_to_parse(_, []) -> ok;
 save_to_parse(Channel, Requests) ->
-    case dgiot_parse:batch(Channel,Requests) of
+    case dgiot_parse:batch(Channel, Requests) of
         {ok, Results} ->
             dgiot_metrics:inc(dgiot_parse, <<"parse_save_success">>, length(Requests)),
             do_result(Requests, Results);
         %%  错误报文应该丢弃，不是所有报文都应该重新缓存
-        #{<<"code">> := 100,<<"error">> := _Error} ->
-            dgiot_metrics:inc(dgiot_parse, <<"parse_save_fail">>, length(Requests)),
-            save_to_cache(Channel, Requests);
+        #{<<"code">> := 100, <<"error">> := _Error} ->
+            dgiot_metrics:inc(dgiot_parse, <<"parse_save_fail">>, length(Requests));
         Result ->
             log(Requests, Result),
             dgiot_metrics:inc(dgiot_parse, <<"parse_save_fail">>, length(Requests)),
@@ -105,6 +139,16 @@ log(_Request, #{<<"success">> := _}) -> ok;
 log(Request, #{<<"error">> := Error}) ->
     io:format("save ~p, cache,~p~n", [Request, Error]).
 
+
+test() ->
+    Fun3 = fun
+               ({_, _, ['Device' | _]} = X) ->
+                   io:format("~p~n", [X]);
+               ({_, _, [_ClassesName | _]}) ->
+                   pass
+           end,
+    dgiot_mnesia:search(Fun3, #{}).
+
 save_test(Count) ->
     [save_to_cache(#{
         <<"method">> => <<"POST">>,
@@ -113,4 +157,3 @@ save_test(Count) ->
             <<"i">> => I
         }
     }) || I <- lists:seq(1, Count)], ok.
-

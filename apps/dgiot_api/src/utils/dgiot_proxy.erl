@@ -38,7 +38,7 @@ get_opts(Path) ->
                 string:sub_string(dgiot_utils:to_list(Path), Size + 1)
         end,
     {ok, Type} = application:get_env(dgiot_api, dicttype),
-    DictId = dgiot_parse:get_dictid(Flag, dgiot_utils:to_binary(Type), <<"Dict">>, <<"Dict">>),
+    DictId = dgiot_parse_id:get_dictid(Flag, dgiot_utils:to_binary(Type), <<"Dict">>, <<"Dict">>),
     Data =
         case dgiot_data:get(DictId) of
             not_find ->
@@ -50,7 +50,7 @@ get_opts(Path) ->
                 end;
             Data1 -> Data1
         end,
-    Host = maps:get(<<"host">>, Data, <<"www.iotn2n.com">>),
+    Host = maps:get(<<"host">>, Data, <<"www.dgiotcloud.cn">>),
     Wlanip = get_wlanip(),
     NewHost = re:replace(Host, <<"127.0.0.1">>, Wlanip, [global, {return, binary}]),
     Protocol = dgiot_utils:to_list(maps:get(<<"protocol">>, Data, <<"http">>)),
@@ -82,8 +82,6 @@ init(Req0, proxy) ->
             ?LOG(info, "Proxy response: ~p ~s", [RespStatus, RespReason]),
             OkReq1 = cowboy_req:reply(RespStatus, response_headers(Resp, State), RespBody, Req1),
             PostOkReq1 = Mod:post_hook(OkReq1, State),
-            ?LOG(info, "OkReq1 ~p", [OkReq1]),
-            ?LOG(info, "PostOkReq1 ~p", [PostOkReq1]),
             {ok, PostOkReq1, State};
         % Proxy error (not error on remote server, actual e.g. network error)
         Error ->

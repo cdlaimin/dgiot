@@ -114,7 +114,7 @@ parse_path(Mod, Path, Method, MethodInfo, SWSchema, Init) ->
         check_request => get_check_request(MethodInfo, SWSchema),
         check_response => get_check_response(MethodInfo, SWSchema)
     },
-    dgiot_data:insert(?DGIOT_SWAGGER, OperationId,get_check_request(MethodInfo, SWSchema)),
+    dgiot_data:insert(?DGIOT_SWAGGER, OperationId, get_check_request(MethodInfo, SWSchema)),
     RealPath = dgiot_httpc:url_join([BasePath, NewPath]),
     {ok, Id} = set_state(OperationId, Config#{logic_handler => Mod}),
     State = #{
@@ -154,11 +154,11 @@ init(Req0, swagger_list) ->
                         end, [], List),
                 dgiot_req:reply(200, ?HEADER#{
                     <<"content-type">> => <<"application/json; charset=utf-8">>
-                }, jsx:encode(Swaggers), Req0);
+                }, dgiot_json:encode(Swaggers), Req0);
             {error, Reason} ->
                 dgiot_req:reply(500, ?HEADER#{
                     <<"content-type">> => <<"application/json; charset=utf-8">>
-                }, jsx:encode(#{error => dgiot_utils:to_binary(Reason)}), Req0)
+                }, dgiot_json:encode(#{error => dgiot_utils:to_binary(Reason)}), Req0)
         end,
     {ok, Req, swagger_list};
 
@@ -167,13 +167,14 @@ init(Req0, {swagger, Name} = Opts) ->
     Req =
         case dgiot_swagger:read(Name, Config) of
             {ok, Schema} ->
+
                 dgiot_req:reply(200, ?HEADER#{
                     <<"content-type">> => <<"application/json; charset=utf-8">>
-                }, jsx:encode(Schema), Req0);
+                }, dgiot_json:encode(filter(Schema)), Req0);
             {error, Reason} ->
                 dgiot_req:reply(500, ?HEADER#{
                     <<"content-type">> => <<"application/json; charset=utf-8">>
-                }, jsx:encode(#{error => dgiot_utils:to_binary(Reason)}), Req0)
+                }, dgiot_json:encode(#{error => dgiot_utils:to_binary(Reason)}), Req0)
         end,
     {ok, Req, Opts};
 
@@ -190,16 +191,16 @@ init(Req0, install) ->
                     {Type, Reason} when Type == 'EXIT'; Type == error ->
                         dgiot_req:reply(500, ?HEADER#{
                             <<"content-type">> => <<"application/json; charset=utf-8">>
-                        }, jsx:encode(#{error => list_to_binary(io_lib:format("~p", [Reason]))}), Req0);
+                        }, dgiot_json:encode(#{error => list_to_binary(io_lib:format("~p", [Reason]))}), Req0);
                     Result ->
                         dgiot_req:reply(200, #{
                             <<"content-type">> => <<"application/json; charset=utf-8">>
-                        }, jsx:encode(Result), Req0)
+                        }, dgiot_json:encode(Result), Req0)
                 end;
             _ ->
                 dgiot_req:reply(200, #{
                     <<"content-type">> => <<"application/json; charset=utf-8">>
-                }, jsx:encode(#{<<"result">> => <<"forbid">>}), Req0)
+                }, dgiot_json:encode(#{<<"result">> => <<"forbid">>}), Req0)
         end,
     {ok, Req, install};
 
@@ -207,11 +208,11 @@ init(Req0, install) ->
 init(Req0, mod) ->
     Mod = dgiot_req:binding(<<"Mod">>, Req0),
     Fun = dgiot_req:binding(<<"Fun">>, Req0),
-    ?LOG(error,"Mod ~p Fun ~p",[Mod,Fun]),
+%%    ?LOG(error,"Mod ~p Fun ~p",[Mod,Fun]),
     Req =
         case catch apply(list_to_atom(binary_to_list(Mod)), list_to_atom(binary_to_list(Fun)), [Req0]) of
             {Err, Reason} when Err == 'EXIT'; Err == error ->
-                Msg = jsx:encode(#{error => dgiot_utils:to_binary(Reason)}),
+                Msg = dgiot_json:encode(#{error => dgiot_utils:to_binary(Reason)}),
                 dgiot_req:reply(500, ?HEADER#{
                     <<"content-type">> => <<"application/json; charset=utf-8">>
                 }, Msg, Req0);
@@ -220,6 +221,7 @@ init(Req0, mod) ->
         end,
     {ok, Req, mod};
 
+%% 允许浏览器跨域请求
 init(Req, Opts) ->
     case dgiot_req:method(Req) of
         <<"OPTIONS">> ->
@@ -287,7 +289,6 @@ get_check_response(Map, SWSchema) ->
             }
         end,
     maps:fold(Fun, #{}, Responses).
-
 
 parse_ref_schema(#{<<"description">> := _} = Schema, SWSchema) ->
     parse_ref_schema(maps:without([<<"description">>], Schema), SWSchema);
@@ -378,3 +379,24 @@ get_state_by_operation(OperationId) ->
         {error, empty} ->
             {error, not_find}
     end.
+
+%% todo 过滤swaager文件
+filter(Schema) ->
+%%    io:format("~s ~p ~p ~n", [?FILE, ?LINE, maps:keys(Schema)]),
+%%              Tags = maps:get(<<"tags">>,Schema),
+    Paths = maps:get(<<"paths">>, Schema),
+    NewPath =
+        maps:fold(fun
+                      (<<"/level/", _/binary>>, _V, Acc) ->
+                          Acc;
+%%                                  (<<"/classes/", _/binary>>, _V, Acc) ->
+%%                                      Acc;
+                      (<<"/schema/", _/binary>>, _V, Acc) ->
+                          Acc;
+                      (K, V, Acc) ->
+                          Acc#{K => V}
+                  end, #{}, Paths),
+    List = lists:keysort(1, maps:to_list(NewPath)),
+    Schema#{
+        <<"paths">> => maps:from_list(List)
+    }.

@@ -31,10 +31,10 @@
     cType => ?TYPE,
     type => ?PROTOCOL_CHL,
     title => #{
-        zh => <<"MODBUS通道"/utf8>>
+        zh => <<"MODBUS采集通道"/utf8>>
     },
     description => #{
-        zh => <<"MODBUS通道"/utf8>>
+        zh => <<"MODBUS采集通道"/utf8>>
     }
 }).
 %% 注册通道参数
@@ -67,19 +67,19 @@
         order => 3,
         type => string,
         required => true,
-        default => <<"9C-A5-25-**-**-**">>,
+        default => <<"6D-5G-8I-**-**-**">>,
         title => #{
             zh => <<"登录报文帧头"/utf8>>
         },
         description => #{
-            zh => <<"填写正则表达式匹配login"/utf8>>
+            zh => <<"填写正则表达式匹配login报文, 设备地址, 中杠会自动去除"/utf8>>
         }
     },
     <<"dtutype">> => #{
-        order => 4,
+        order => 5,
         type => string,
         required => true,
-        default => <<"usr">>,
+        default => <<"DGIOT">>,
         title => #{
             zh => <<"控制器厂商"/utf8>>
         },
@@ -91,7 +91,7 @@
         order => 102,
         type => string,
         required => false,
-        default => <<"http://dgiot-1253666439.cos.ap-shanghai-fsi.myqcloud.com/shuwa_tech/zh/product/dgiot/channel/modbus.png">>,
+        default => <<"/dgiot_file/shuwa_tech/zh/product/dgiot/channel/modbus_channel.png">>,
         title => #{
             en => <<"channel ICO">>,
             zh => <<"通道ICO"/utf8>>
@@ -133,9 +133,8 @@ init(?TYPE, ChannelId, #{
         product = ProdcutId,
         dtutype = Dtutype
     },
+    {ok, State, dgiot_modbusrtu_tcp:start(Port, State)};
 
-%%    dgiot_data:insert({ChannelId, heartbeat}, {Heartbeat, Port}),
-    {ok, State, dgiot_modbus_tcp:start(Port, State)};
 
 init(?TYPE, _ChannelId, _Args) ->
     {ok, #{}, #{}}.
@@ -176,7 +175,13 @@ get_app(Products) ->
                 _ -> false
             end
                     end,
-        [<<"role:", App/binary>> | _] = lists:filter(Predicate, maps:keys(Acl)),
+        App =
+            case lists:filter(Predicate, maps:keys(Acl)) of
+                [<<"role:", Name/binary>> | _] ->
+                    Name;
+                _ ->
+                    <<"dgiot">>
+            end,
         {ProdcutId, App}
               end, Products).
 

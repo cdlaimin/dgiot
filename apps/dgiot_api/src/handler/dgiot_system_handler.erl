@@ -80,6 +80,10 @@ handle(OperationID, Args, Context, Req) ->
 %%% 内部函数 Version:API版本
 %%%===================================================================
 
+%% 修改域名证书
+do_request(post_domain, Args, _Context, _Req) ->
+    dgiot:domain(Args);
+
 %% 产生handler代码
 do_request(post_generate_api, #{<<"mod">> := Mod, <<"type">> := <<"erlang">>} = Args, _Context, _Req) ->
     SWSchema = maps:without([<<"mod">>, <<"type">>], Args),
@@ -88,7 +92,7 @@ do_request(post_generate_api, #{<<"mod">> := Mod, <<"type">> := <<"erlang">>} = 
     case dgiot_swagger:compile_handler(Module, SWSchema, Fun) of
         {ok, Src} when is_binary(Src) ->
             FileName = "dgiot.zip",
-            case generate_erl_packet(FileName, Mod, Src, jsx:encode(SWSchema)) of
+            case generate_erl_packet(FileName, Mod, Src, dgiot_json:encode(SWSchema)) of
                 {ok, ZipFile} ->
                     Headers = #{
                         <<"content-type">> => <<"application/zip">>,
@@ -141,7 +145,7 @@ do_request(get_plugin, _Args, _Context, _Req) ->
 %% OperationId:post_plugin_action
 %% 请求:POST /iotapi/plugin/:Action
 do_request(post_plugin_app, #{<<"Action">> := Action, <<"App">> := App}, _Context, _Req) ->
-    case dgiot_license:check_plugin(App) of
+    case dgiot_plugin:check_plugin(App) of
         true ->
             case Action of
                 <<"stop">> ->
@@ -177,6 +181,16 @@ do_request(post_plugin_app, #{<<"Action">> := Action, <<"App">> := App}, _Contex
         _ ->
             {200, #{<<"error">> => <<"license error">>}}
     end;
+
+%% iot_hub 概要: 升级插件
+%% OperationId:post_station_data
+%% 请求:POST /iotapi/post_station_data
+do_request(post_upgrade_plugin, #{<<"file">> := #{<<"filename">> := Filename, <<"fullpath">> := Fullpath}}, _Context, _Req) ->
+    Len = size(Filename) - 5,
+    <<Mod:Len/binary, _/binary>> = Filename,
+    {file, Here} = code:is_loaded(dgiot_utils:to_atom(Mod)),
+    os:cmd("cp -R " ++ dgiot_utils:to_list(Fullpath) ++ " " ++ Here),
+    {200, #{<<"status">> => 0, <<"msg">> => <<"success">>, <<"data">> => #{}}};
 
 
 %% System 概要: 编译代码 描述:在线编译代码
@@ -214,7 +228,7 @@ do_request(post_cluster, #{<<"action">> := Action, <<"node">> := N}, _Context, _
 do_request(put_log_level, #{<<"type">> := Type, <<"name">> := Name, <<"level">> := Level}, _Context, _Req) ->
     case dgiot_logger:set_loglevel(Type, Name, Level) of
         ok ->
-            LoglevelId = dgiot_parse:get_loglevelid(Name, Type),
+            LoglevelId = dgiot_parse_id:get_loglevelid(Name, Type),
             dgiot_parse:update_object(<<"LogLevel">>, LoglevelId, #{<<"level">> => Level}),
             {200, #{<<"code">> => 200, <<"msg">> => <<"SUCCESS">>}};
         {error, Reason} ->
@@ -227,24 +241,24 @@ do_request(get_log_level, _Args, _Context, _Req) ->
 
 %% traces 概要: 获取traces 描述:获取traces列表
 do_request(get_trace, _Args, _Context, _Req) ->
-    Data = emqx_tracer:lookup_traces(),
-    NewData =
-        lists:foldl(fun(X, Acc) ->
-            case X of
-                {{topic, Name}, {Level, _}} ->
-                    Acc ++ [#{<<"name">> => dgiot_utils:to_binary(Name), <<"level">> => dgiot_utils:to_binary(Level)}];
-                _ ->
-                    Acc
-            end
-                    end, [], Data),
-    {200, #{<<"code">> => 200, <<"data">> => NewData}};
+%%    Data = emqx_tracer:lookup_traces(),
+%%%%    NewData =
+%%%%        lists:foldl(fun(X, Acc) ->
+%%%%            case X of
+%%%%                {{topic, Name}, {Level, _}} ->
+%%%%                    Acc ++ [#{<<"name">> => dgiot_utils:to_binary(Name), <<"level">> => dgiot_utils:to_binary(Level)}];
+%%%%                _ ->
+%%%%                    Acc
+%%%%            end
+%%%%                    end, [], Data),
+    {200, #{<<"code">> => 200, <<"data">> => #{}}};
 
 %% traces 概要: traces 描述:启动，停止traces
 do_request(post_trace, #{<<"action">> := Action, <<"tracetype">> := Tracetype, <<"handle">> := Handle}, _Context, _Req) ->
     Rtn =
         case Action of
             <<"start">> ->
-                ?LOG(info,"Tracetype ~p, Handle ~p",[Tracetype,Handle]),
+                ?LOG(info, "Tracetype ~p, Handle ~p", [Tracetype, Handle]),
                 dgiot_tracer:add_trace({dgiot_utils:to_atom(Tracetype), Handle});
             <<"stop">> ->
                 dgiot_tracer:del_trace({dgiot_utils:to_atom(Tracetype), Handle});

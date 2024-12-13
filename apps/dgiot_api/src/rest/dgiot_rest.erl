@@ -41,7 +41,7 @@
 -export([call/3]).
 
 -dgiot_data("ets").
--export([init_ets/0, get_log/4]).
+-export([init_ets/0, get_log/4, get_OperationID/2]).
 
 -record(state, {
     operationid :: atom(),
@@ -82,13 +82,25 @@ init(Req, #{logic_handler := LogicHandler} = Map) ->
         _ ->
             case call(LogicHandler, init, [Req, Map]) of
                 {no_call, Req1} ->
-                    Index = maps:get(Method, Map),
-                    {ok, {_, Config}} = dgiot_router:get_state(Index),
-                    default_init(Config, State, Req1);
+                    case maps:find(Method, Map) of
+                        {ok, Index} ->
+                            {ok, {_, Config}} = dgiot_router:get_state(Index),
+                            default_init(Config, State, Req1);
+                        _ ->
+                            pass
+                    end;
                 no_call ->
-                    Index = maps:get(Method, Map),
-                    {ok, {_, Config}} = dgiot_router:get_state(Index),
-                    default_init(Config, State, Req);
+                    case maps:find(Method, Map) of
+                        {ok, Index} ->
+                            case dgiot_router:get_state(Index) of
+                                {ok, {_, Config}} ->
+                                    default_init(Config, State, Req);
+                                _ ->
+                                    pass
+                            end;
+                        _ ->
+                            pass
+                    end;
                 {?MODULE, Req1, NewConfig} ->
                     default_init(NewConfig, State, Req1)
             end
@@ -149,10 +161,12 @@ is_authorized(Req0, State = #state{
             {true, Req0, State};
         false ->
             AuthList = maps:get(authorize, Context, []),
-            CheckResult = dgiot_auth:pre_check(OperationID, LogicHandler, AuthList, Req0),
+            AuthOperationID = get_OperationID(OperationID, LogicHandler),
+%%            io:format("~s ~p ~p ~p ~p ~n",[?FILE, ?LINE, OperationID, AuthOperationID, LogicHandler]),
+            CheckResult = dgiot_auth:pre_check(AuthOperationID, LogicHandler, AuthList, Req0),
             case CheckResult of
                 {ok, Args, Req} ->
-                    case do_authorized(LogicHandler, OperationID, Args, Req) of
+                    case do_authorized(LogicHandler, AuthOperationID, Args, Req) of
                         {true, NContext, Req1} ->
                             {true, Req1, State#state{context = maps:merge(Context, NContext)}};
                         {forbidden, Err, Req1} when AuthList =/= [] ->
@@ -169,7 +183,18 @@ is_authorized(Req0, State = #state{
             end
     end.
 
-
+get_OperationID(OperationID, LogicHandler) ->
+    case proplists:get_value(exports, LogicHandler:module_info()) of
+        undefined ->
+            OperationID;
+        Exports ->
+            case proplists:get_value(get_OperationID, Exports) of
+                undefined -> OperationID;
+                _ ->
+                    {_Type, NewOperationID} = LogicHandler:get_OperationID(OperationID),
+                    dgiot_utils:to_atom(NewOperationID)
+            end
+    end.
 
 -spec content_types_accepted(Req :: dgiot_req:req(), State :: state()) ->
     {
@@ -356,6 +381,7 @@ handle_multipart({file, Name, Filename, ContentType}, Req, Acc, State) ->
 
 
 do_authorized(LogicHandler, OperationID, Args, Req) ->
+%%    io:format("~s ~p   LogicHandler = ~p OperationID = ~p ~n", [?FILE, ?LINE, LogicHandler, OperationID]),
     case call(LogicHandler, check_auth, [OperationID, Args, Req]) of
         no_call ->
             dgiot_auth:check_auth(OperationID, Args, Req);
@@ -378,7 +404,7 @@ default_mock_handler(_OperationID, _Populated, Context, Req) ->
 do_response(Status, Headers, Body, Req, State) when is_map(Body); is_list(Body) ->
     %% @todo 这个地方有点问题
     %% catch dgiot_rest_check:check_response(Status, State#state.context, Body),
-    do_response(Status, Headers, jsx:encode(Body), Req, State);
+    do_response(Status, Headers, dgiot_json:encode(Body), Req, State);
 do_response(Status, Headers, Body, Req0, State) when is_binary(Body) ->
     NewHeaders = maps:merge(Headers, ?HEADER),
     Req =
@@ -390,7 +416,7 @@ do_response(Status, Headers, Body, Req0, State) when is_binary(Body) ->
                         dgiot_req:reply(Status, NewHeaders, Body, Req0);
                     false ->
                         Res = #{<<"error">> => <<"Server Internal error">>},
-                        dgiot_req:reply(Status, NewHeaders, jsx:encode(Res), Req0)
+                        dgiot_req:reply(Status, NewHeaders, dgiot_json:encode(Res), Req0)
                 end;
             false ->
                 dgiot_req:reply(Status, NewHeaders, Body, Req0)
@@ -398,13 +424,18 @@ do_response(Status, Headers, Body, Req0, State) when is_binary(Body) ->
     {stop, Req, State}.
 
 call(Mod, Fun, Args) ->
-    case erlang:function_exported(Mod, Fun, length(Args)) of
+    case erlang:module_loaded(Mod) of
         true ->
-            {Time, Result} = timer:tc(Mod, Fun, Args),
-            get_log(Fun, Args, Time, Result),
-            Result;
+            case erlang:function_exported(Mod, Fun, length(Args)) of
+                true ->
+                    {Time, Result} = timer:tc(Mod, Fun, Args),
+                    get_log(Fun, Args, Time, Result),
+                    Result;
+                false ->
+                    no_call
+            end;
         false ->
-            no_call
+            no_module
     end.
 
 init_ets() ->
@@ -433,10 +464,14 @@ log(#{peer := {PeerName, _}, headers := Headers} = Req, Time, Result, Map) when 
         case Result of
             {200, _, _, _} ->
                 {200, <<"success">>};
+            {200, _, _} ->
+                {200, <<"success2">>};
+            {200, _} ->
+                {200, <<"success3">>};
             _ ->
                 {<<"error">>, <<"error">>}
         end,
-    ?MLOG(info, NewReq#{
+    ?MLOG(debug, NewReq#{
         <<"code">> => Code,
         <<"reason">> => Reason,
         <<"ip">> => RealIp,

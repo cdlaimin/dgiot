@@ -20,8 +20,7 @@
 -include_lib("dgiot_bridge/include/dgiot_bridge.hrl").
 -include("dgiot_task.hrl").
 -include_lib("dgiot/include/logger.hrl").
--define(TYPE, <<"INSTRUCT">>).
--record(state, {id, mod, product, env = #{}}).
+-record(state, {id, mod, products, env = #{}}).
 
 -dgiot_data("ets").
 -export([init_ets/0]).
@@ -33,7 +32,6 @@
 
 %% 注册通道类型
 -channel_type(#{
-
     cType => ?TYPE,
     type => ?BRIDGE_CHL,
     title => #{
@@ -45,56 +43,8 @@
 }).
 %% 注册通道参数
 -params(#{
-    <<"vcaddr">> => #{
-        order => 1,
-        type => string,
-        required => false,
-        default => <<"all"/utf8>>,
-        title => #{
-            zh => <<"网关逻辑地址"/utf8>>
-        },
-        description => #{
-            zh => <<"网关逻辑地址"/utf8>>
-        }
-    },
-    <<"pn">> => #{
-        order => 2,
-        type => string,
-        required => false,
-        default => <<"all"/utf8>>,
-        title => #{
-            zh => <<"子网地址"/utf8>>
-        },
-        description => #{
-            zh => <<"子网地址"/utf8>>
-        }
-    },
-    <<"start_time">> => #{
-        order => 3,
-        type => string,
-        required => false,
-        default => <<"2020-03-26 10:35:10"/utf8>>,
-        title => #{
-            zh => <<"开始时间"/utf8>>
-        },
-        description => #{
-            zh => <<"开始时间"/utf8>>
-        }
-    },
-    <<"end_time">> => #{
-        order => 4,
-        type => string,
-        required => false,
-        default => <<"2025-05-28 10:35:10"/utf8>>,
-        title => #{
-            zh => <<"结束时间"/utf8>>
-        },
-        description => #{
-            zh => <<"结束时间"/utf8>>
-        }
-    },
     <<"freq">> => #{
-        order => 5,
+        order => 1,
         type => integer,
         required => false,
         default => 180,
@@ -102,63 +52,50 @@
             zh => <<"采集频率/秒"/utf8>>
         },
         description => #{
-            zh => <<"采集频率/秒"/utf8>>
+            zh => <<"网关及网关下所有子设备的采集频率/秒"/utf8>>
         }
     },
-    <<"page_index">> => #{
-        order => 6,
-        type => integer,
+    <<"start_time">> => #{
+        order => 2,
+        type => string,
         required => false,
-        default => 1,
+        default => <<"2020-03-26 10:35:10"/utf8>>,
         title => #{
-            zh => <<"起始记录号"/utf8>>
+            zh => <<"任务开始时间"/utf8>>
         },
         description => #{
-            zh => <<"起始记录号"/utf8>>
+            zh => <<"任务开始时间"/utf8>>
         }
     },
-    <<"page_size">> => #{
-        order => 7,
-        type => integer,
+    <<"end_time">> => #{
+        order => 3,
+        type => string,
         required => false,
-        default => 1,
+        default => <<"2025-05-28 10:35:10"/utf8>>,
         title => #{
-            zh => <<"每页记录数"/utf8>>
+            zh => <<"任务结束时间"/utf8>>
         },
         description => #{
-            zh => <<"每页记录数"/utf8>>
+            zh => <<"任务结束时间"/utf8>>
         }
     },
-    <<"total">> => #{
-        order => 8,
-        type => integer,
-        required => false,
-        default => 1,
+    <<"rand">> => #{
+        order => 4,
+        type => boolean,
+        required => true,
+        default => true,
         title => #{
-            zh => <<"总计页数"/utf8>>
+            zh => <<"是否错峰执行任务"/utf8>>
         },
         description => #{
-            zh => <<"总计页数"/utf8>>
-        }
-    },
-    <<"mode">> => #{
-        order => 9,
-        type => enum,
-        required => false,
-        default => <<"thing"/utf8>>,
-        enum => [<<"thing">>, <<"instruct">>],
-        title => #{
-            zh => <<"指令模式"/utf8>>
-        },
-        description => #{
-            zh => <<"指令模式:thing|instruct"/utf8>>
+            zh => <<"每轮任务开始时,是否随机开始,错峰处理"/utf8>>
         }
     },
     <<"ico">> => #{
         order => 102,
         type => string,
         required => false,
-        default => <<"http://dgiot-1253666439.cos.ap-shanghai-fsi.myqcloud.com/shuwa_tech/zh/product/dgiot/channel/%E6%8C%87%E4%BB%A4%E4%BB%BB%E5%8A%A1%E5%9B%BE%E6%A0%87.png">>,
+        default => <<"/dgiot_file/shuwa_tech/zh/product/dgiot/channel/task_channel.png">>,
         title => #{
             en => <<"channel ICO">>,
             zh => <<"通道ICO"/utf8>>
@@ -172,41 +109,27 @@
 
 init_ets() ->
     dgiot_data:init(?DGIOT_TASK),
-    dgiot_data:init(?TASK_ARGS),
+    dgiot_data:init(?DGIOT_DATA_CACHE),
     dgiot_data:init(?DGIOT_PNQUE).
 
 start(ChannelId, ChannelArgs) ->
     dgiot_channelx:add(?TYPE, ChannelId, ?MODULE, ChannelArgs).
 
 %% 通道初始化
-init(?TYPE, ChannelId, Args) ->
-    #{<<"product">> := Products} = Args,
-    NewArgs = maps:without([<<"product">>], Args),
-    State = #state{id = ChannelId, env = #{
-        <<"products">> => Products,
-        <<"args">> => NewArgs}
-    },
-    {ok, State, []}.
+init(?TYPE, ChannelId, #{<<"product">> := Products} = Args) ->
+    #{<<"freq">> := Freq, <<"start_time">> := Start_time, <<"end_time">> := End_time} = Args,
+    Rand = maps:get(<<"rand">>, Args, true),
+    dgiot_client:add_clock(ChannelId, Start_time, End_time),
+    State = #state{id = ChannelId, products = get_productids(Products)},
+    {ok, State, dgiot_client:register(ChannelId, task_sup, #{
+        <<"channel">> => ChannelId,
+        <<"starttime">> => dgiot_datetime:localtime_to_unixtime(dgiot_datetime:to_localtime(Start_time)),
+        <<"endtime">> => dgiot_datetime:localtime_to_unixtime(dgiot_datetime:to_localtime(End_time)),
+        <<"freq">> => Freq,
+        <<"rand">> => Rand
+    })}.
 
-handle_init(#state{id = ChannelId, env = #{<<"products">> := Products, <<"args">> := Args}} = State) ->
-    lists:map(fun({ProductId, #{<<"ACL">> := Acl}}) ->
-        Predicate = fun(E) ->
-            case E of
-                <<"role:", _/binary>> -> true;
-                _ -> false
-            end
-                    end,
-        [<<"role:", App/binary>> | _] = lists:filter(Predicate, maps:keys(Acl)),
-        dgiot_data:set_consumer(<<"taskdelay/", ChannelId/binary>>, 100),
-        NewArgs = Args#{
-            <<"app">> => App,
-            <<"product">> => ProductId,
-            <<"channel">> => ChannelId},
-        dgiot_data:insert({?TASK_ARGS, ProductId}, NewArgs),
-        dgiot_task:load(NewArgs)
-              end, Products),
-    dgiot_task:timing_start(Args#{<<"channel">> => ChannelId}),
-    dgiot_parse:subscribe(<<"device_id">>, delete),
+handle_init(State) ->
     {ok, State}.
 
 %% 通道消息处理,注意：进程池调用
@@ -214,53 +137,44 @@ handle_event(_EventId, Event, State) ->
     ?LOG(info, "channel ~p", [Event]),
     {ok, State}.
 
-handle_message({sync_parse, Args}, State) ->
-%%    io:format("DeviceArgs ~p~n", [jsx:decode(Args, [{labels, binary}, return_maps])]),
-    case jsx:decode(Args, [return_maps]) of
-        #{<<"objectId">> := DtuId} ->
-%%            从队列删除该设备
-            dgiot_task:del_pnque(DtuId),
-            case dgiot_parse:query_object(<<"Dict">>, #{<<"where">> => #{<<"key">> => DtuId, <<"class">> => <<"Device">>}}) of
-                {ok, #{<<"results">> := Dicts}} ->
-                    DictRequests =
-                        lists:foldl(fun(#{<<"objectId">> := DictId}, Acc) ->
-                            Acc ++ [#{
-                                <<"method">> => <<"DELETE">>,
-                                <<"path">> => <<"/classes/Dict/", DictId/binary>>,
-                                <<"body">> => #{}
-                            }]
-                                    end, [], Dicts),
-                    dgiot_parse:batch(DictRequests);
-                _ ->
-                    pass
-            end,
-            case dgiot_parse:query_object(<<"View">>, #{<<"where">> => #{<<"key">> => DtuId, <<"class">> => <<"Device">>}}) of
-                {ok, #{<<"results">> := Views}} ->
-                    ViewRequests =
-                        lists:foldl(fun(#{<<"objectId">> := ViewId}, Acc) ->
-                            Acc ++ [#{
-                                <<"method">> => <<"DELETE">>,
-                                <<"path">> => <<"/classes/View/", ViewId/binary>>,
-                                <<"body">> => #{}
-                            }]
-                                    end, [], Views),
-                    dgiot_parse:batch(ViewRequests);
-                _ ->
-                    pass
-            end;
+handle_message(start_client, #state{id = ChannelId, products = Products} = State) ->
+%%    io:format("~s ~p ChannelId = ~p.~n", [?FILE, ?LINE, ChannelId]),
+    case dgiot_data:get({start_client, binary_to_atom(ChannelId)}) of
+        not_find ->
+            dgiot_task:start(ChannelId, Products),
+            dgiot_data:insert({start_client, ChannelId}, ChannelId),
+            erlang:send_after(1000 * 60 * 1, self(), check_newdevice);
+        _ ->
+            pass
+    end,
+    {ok, State};
+
+handle_message(stop_client, #state{id = ChannelId} = State) ->
+%%    io:format("~s ~p ChannelId = ~p.~n", [?FILE, ?LINE, ChannelId]),
+    dgiot_client:stop(ChannelId),
+    dgiot_data:insert({stop_client, ChannelId}, ChannelId),
+    {ok, State};
+
+handle_message(check_newdevice, #state{id = ChannelId, products = Products} = State) ->
+%%    io:format("~s ~p time ~p ChannelId = ~p.~n", [?FILE, ?LINE, dgiot_datetime:format(dgiot_datetime:now_secs(), <<"YY-MM-DD HH:NN:SS">>), ChannelId]),
+    case dgiot_data:get({stop_client, binary_to_atom(ChannelId)}) of
+        not_find ->
+            dgiot_task:start(ChannelId, Products),
+            erlang:send_after(1000 * 60 * 1, self(), check_newdevice);
         _ ->
             pass
     end,
     {ok, State};
 
 handle_message(_Message, State) ->
-    ?LOG(info, "_Message ~p", [_Message]),
     {ok, State}.
 
-stop(ChannelType, ChannelId, #state{env = #{<<"product">> := ProductId, <<"args">> := Args}} = _State) ->
-    spawn(fun() ->
-        dgiot_task:stop(Args#{<<"product">> => ProductId, <<"channel">> => ChannelId})
-          end),
-    ?LOG(warning, "channel stop ~p,~p", [ChannelType, ChannelId]),
+stop(_ChannelType, ChannelId, _State) ->
+    dgiot_task:del_client(ChannelId),
+    dgiot_client:stop(ChannelId),
     ok.
 
+get_productids(Products) ->
+    lists:foldl(fun({ProductId, _}, Acc) ->
+        Acc ++ [ProductId]
+                end, [], Products).

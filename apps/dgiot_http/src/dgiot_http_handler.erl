@@ -74,21 +74,136 @@ do_request(get_file_signature, Args, _Context, _Req) ->
         _ -> {404, #{<<"code">> => 1001, <<"error">> => <<"not support this type">>}}
     end;
 
+% 获取配置
+do_request(get_configuration, _, _Context, _Req) ->
+    DictId = dgiot_parse_id:get_dictid(<<"dgiotconfiguration">>, <<"configuration">>, <<"configuration">>, <<"dgiotconfiguration">>),
+    case dgiot_parse:get_object(<<"Dict">>, DictId) of
+        {ok, #{<<"data">> := Data}} ->
+            {ok, #{<<"code">> => 200, <<"msg">> => <<"success">>, <<"data">> => Data}};
+        _ ->
+            Data = #{
+                <<"sms">> => #{
+                    <<"appid">> => <<"">>,
+                    <<"appkey">> => <<"">>,
+                    <<"sign">> => <<"">>
+                },
+                <<"mail">> => #{
+                    <<"username">> => <<"">>,
+                    <<"password">> => <<"">>,
+                    <<"smtp">> => <<"">>
+                }
+            },
+            {ok, #{<<"code">> => 200, <<"msg">> => <<"success">>, <<"data">> => Data}}
+    end;
+
+% 编辑配置
+do_request(post_configuration, #{<<"data">> := Data}, _Context, _Req) ->
+    DictId = dgiot_parse_id:get_dictid(<<"dgiotconfiguration">>, <<"configuration">>, <<"configuration">>, <<"dgiotconfiguration">>),
+    Result =
+        case dgiot_parse:get_object(<<"Dict">>, DictId) of
+            {ok, _} ->
+                dgiot_parse:update_object(<<"Dict">>, DictId, #{<<"data">> => Data});
+            _ ->
+                Dict = #{
+                    <<"key">> => <<"dgiotconfiguration">>,
+                    <<"type">> => <<"configuration">>,
+                    <<"class">> => <<"configuration">>,
+                    <<"title">> => <<"dgiotconfiguration">>,
+                    <<"data">> => Data
+                },
+                case dgiot_parse:create_object(<<"Dict">>, Dict) of
+                    {ok, Msg} ->
+                        {ok, Msg};
+                    {error, Reason1} ->
+                        {error, Reason1}
+                end
+        end,
+    dgiot_notification:save_configuration(),
+    Result;
+
+% 短信发送
+do_request(post_sendsms_msg, #{<<"phones">> := Phones, <<"tplid">> := TplId, <<"params">> := Params} = _Args, _Context, _Req) ->
+    Mobile =
+        lists:foldl(fun(Phone, Acc) ->
+            Acc ++ [#{<<"mobile">> => Phone, <<"nationcode">> => <<"86">>}]
+                    end, [], binary:split(Phones, <<$,>>, [global, trim])),
+    dgiot_notification:send_sms(Mobile, TplId, Params);
+
+%数字工厂告警
+do_request(post_warnsendsms, #{<<"objectId">> := DeviceId, <<"branchId">> := BranchId, <<"datetimes">> := DateTimes, <<"docnumber">> := Docnumber,
+    <<"username">> := _S, <<"workshop">> := Workshop, <<"level">> := Level} = _Args, #{<<"sessionToken">> := SessionToken} = _Context, _Req) ->
+%%    io:format("~s ~p _Args = ~p  ~n", [?FILE, ?LINE,_Args]),
+    UserName = case dgiot_auth:get_session(SessionToken) of
+                   {ok, #{<<"username">> := U}} ->
+                       U;
+                   _ ->
+                       error
+               end,
+
+    case Level of
+        <<"1">> ->
+            Warn = <<"待首检"/utf8>>,
+            dgiot_parse:update_object(<<"Device">>, DeviceId, #{<<"realstatus">> => 3});
+        <<"2">> ->
+            Warn = <<"待尾检"/utf8>>,
+            dgiot_parse:update_object(<<"Device">>, DeviceId, #{<<"realstatus">> => 5});
+        _ ->
+            Warn = <<"告警"/utf8>>
+    end,
+    Warns = Warn,
+    case dgiot_parse:get_object(<<"_Role">>, BranchId) of
+        {ok, #{<<"objectId">> := RolesId, <<"ACL">> := Acl}} ->
+
+            Map = #{
+                <<"type">> => DeviceId,
+                <<"name">> => Workshop,
+                <<"status">> => 0,
+                <<"content">> => #{
+                    <<"alarm">> => _Args#{<<"deviceId">> => DeviceId},
+                    <<"alertstatus">> => 1
+                },
+                <<"ACL">> => Acl
+            },
+            dgiot_parse:create_object(<<"Notification">>, Map),
+            %循环得到部门下所有的手机号
+            Users = dgiot_parse_auth:get_UserIds(unicode:characters_to_binary(RolesId)),
+            UsersQuery = #{<<"where">> => #{<<"objectId">> => #{<<"$in">> => Users}}},
+            {ok, #{<<"results">> := Row}} = dgiot_parse:query_object(<<"_User">>, UsersQuery),
+            PhoneList = lists:foldl(fun(X, Acc) ->
+                Phone = unicode:characters_to_binary(dgiot_utils:to_list(maps:get(<<"phone">>, X))),
+                dgiot_notification:send_sms("+86", Phone, "1473069",
+                    [DateTimes, <<"-">>, UserName, Docnumber, Workshop, Warns],
+                    "1400635630", "40d9609b9e6212cbff051b4f1d4cabfc", <<"质云科技"/utf8>>),
+                Acc ++ [Phone]
+                                    end, [], Row),
+%      模板格式：时间：{1} {2}（发起人：{3}）（单据编号{4}）（车间：{5}）产生异常,警告等级为:{6}。
+            Json = #{<<"phones">> => PhoneList},
+            {ok, #{
+                <<"status">> => 200,
+                <<"msg">> => <<"success">>,
+                <<"data">> => Json
+            }};
+        _ ->
+            {error, #{<<"status">> => 404, <<"msg">> => <<"部门ID错误"/utf8>>, <<"result">> => <<"_Role info null">>}}
+    end;
+
 %% iot_hub 概要: 查询平台api资源 描述:jwt回调
 %% OperationId:get_jwtlogin
 %% 请求:POST /iotapi/get_jwtlogin
 do_request(get_jwtlogin, #{<<"id_token">> := Idtoken}, _Context, _Req) ->
-    dgiot_aliyun_auth:jwtlogin(Idtoken);
+%%    dgiot_aliyun_auth:jwtlogin(Idtoken);
+    io:format("~s ~p Idtoken = ~p.~n", [?FILE, ?LINE, Idtoken]),
+    dgiot_aliyun_auth:aliyun_isplat(Idtoken);
 
 %% iot_hub 概要: 查询平台api资源 描述:wechat登陆
-%% OperationId:post_login
-%% 请求:POST /iotapi/post_login
+%% OperationId:get_wechat
+%% 请求:GET /iotapi/get_wechat
 do_request(get_wechat, #{<<"jscode">> := Jscode}, _Context, _Req) ->
     dgiot_wechat:get_sns(Jscode);
 
 %% iot_hub 概要: 查询平台api资源 描述:wechat绑定
-%% OperationId:post_login
-%% 请求:POST /iotapi/post_login
+%% OperationId:post_wechat
+%% 请求:POST /iotapi/post_wechat
 do_request(post_wechat, #{<<"username">> := UserName, <<"password">> := Password, <<"openid">> := OpenId}, _Context, _Req) ->
     dgiot_wechat:post_sns(UserName, Password, OpenId);
 
@@ -111,20 +226,20 @@ do_request(get_wechat_index, _Args, #{<<"sessionToken">> := SessionToken}, _Req)
 
 
 %% iot_hub 概要: 查询平台api资源 描述:设备地图
-%% OperationId:post_login
-%% 请求:POST /iotapi/post_login
+%% OperationId:get_wechat_map
+%% 请求:GET /iotapi/get_wechat_map
 do_request(get_wechat_map, _Args, #{<<"sessionToken">> := SessionToken}, _Req) ->
     dgiot_wechat:get_wechat_map(SessionToken);
 
 %% iot_hub 概要: 查询平台api资源 描述:设备详情
-%% OperationId:post_login
-%% 请求:POST /iotapi/post_login
+%% OperationId:get_device_info
+%% 请求:GET /iotapi/get_device_info
 do_request(get_device_info, #{<<"deviceid">> := Deviceid}, #{<<"sessionToken">> := SessionToken}, _Req) ->
     dgiot_wechat:get_device_info(Deviceid, SessionToken);
 
 %% iot_hub 概要: 查询平台api资源 描述:设备详情
-%% OperationId:post_login
-%% 请求:POST /iotapi/post_login
+%% OperationId:get_notification
+%% 请求:GET /iotapi/get_notification
 do_request(get_notification, #{<<"productid">> := ProductId, <<"order">> := Order, <<"limit">> := Limit, <<"skip">> := Skip, <<"isprocess">> := Isprocess}, #{<<"sessionToken">> := SessionToken}, _Req) ->
     ?LOG(info, "SessionToken = ~p ", [SessionToken]),
     Where =
@@ -143,17 +258,119 @@ do_request(get_notification, #{<<"productid">> := ProductId, <<"order">> := Orde
 %% iot_hub 概要: 查询平台api资源 描述:发送订阅消息
 %% OperationId:post_sendsubscribe
 %% 请求:POST /iotapi/post_sendsubscribe
-do_request(post_sendsubscribe, Args, #{<<"sessionToken">> := SessionToken}, _Req) ->
-    case dgiot_auth:get_session(SessionToken) of
-        #{<<"objectId">> := UserId} ->
-            dgiot_wechat:sendSubscribe(UserId, Args);
-        _ ->
-            {error, <<"Not Allowed.">>}
+do_request(post_sendsubscribe, #{<<"roleid">> := RoleId} = Args, #{<<"sessionToken">> := _SessionToken}, _Req) ->
+    UserIds = dgiot_parse_id:get_userids(RoleId),
+    lists:map(fun(UserId) ->
+        dgiot_wechat:sendSubscribe_test(UserId, Args)
+              end, UserIds),
+    {ok, #{<<"msg">> => <<"send success">>}};
+
+%% iot_hub 概要: 查询平台api资源 描述:发送邮件
+%% OperationId:post_sendsubscribe
+%% 请求:POST /iotapi/post_sendsubscribe
+do_request(post_sendemail, Args, #{<<"sessionToken">> := _SessionToken}, _Req) ->
+    case dgiot_notification:send_email(Args) of
+        {ok, _R} ->
+            {ok, #{<<"msg">> => <<"send success">>}};
+        _Ot ->
+            {error, #{<<"msg">> => <<"send fail">>}}
     end;
 
+%% iot_hub 概要: 查询平台api资源 描述:工单结束发送
+%% OperationId:get_maintenancefinish
+%% 请求:POST /iotapi/get_maintenancefinish
+do_request(get_maintenancefinish, #{<<"number">> := Number}, #{<<"sessionToken">> := _SessionToken}, _Req) ->
+    Topic = <<"/workOrderCompletion/up">>,
+    dgiot_mqtt:publish(Number, <<"bridge/", Topic/binary>>, dgiot_json:encode(#{<<"id">> => Number})),
+    dgiot_mqtt:publish(Number, Topic, dgiot_json:encode(#{<<"id">> => Number}));
+
+%% iot_hub 概要: 查询平台api资源 描述:创建工单
+%% OperationId:post_maintenance
+%% 请求:POST /iotapi/post_maintenance
+do_request(post_maintenance, Args, #{<<"sessionToken">> := SessionToken}, _Req) ->
+    Isbridge = application:get_env(dgiot_http, isbridge, false),
+    Url = application:get_env(dgiot_http, dgiot_bridge_url, "https://prod.iotn2n.com") ++ "/iotapi/maintenance",
+    Result = dgiot_umeng:create_maintenance(Args, SessionToken),
+    case Isbridge of
+        true ->
+            case catch httpc:request(post, {Url, [], "application/json", dgiot_json:encode(Args)}, [], []) of
+                {'EXIT', _Reason} ->
+                    pass;
+                {ok, {{"HTTP/1.1", 200, "OK"}, _, Json}} ->
+                    jsx:decode(dgiot_utils:to_binary(Json), [{labels, binary}, return_maps]),
+                    pass;
+                _ ->
+                    pass
+            end;
+        _ ->
+            pass
+    end,
+    case Result of
+        {error, #{<<"code">> := 137}} ->
+            {ok, #{<<"code">> => 137, <<"error">> => <<"ID REPEAT">>}};
+        {ok, Result1} ->
+            {ok, Result1};
+        _ ->
+            {ok, #{<<"code">> => 500, <<"error">> => <<"SYSTEM ERROR">>}}
+    end;
+
+%% iot_hub 概要: 获取运维管理列表 描述:获取运维管理列表
+%% OperationId:get_operations
+%% 请求:POST /iotapi/get_operations
+do_request(get_operations, _Args, #{<<"sessionToken">> := _SessionToken}, _Req) ->
+    Data = dgiot_umeng:get_operations(),
+    {ok, #{<<"data">> => Data}};
+
+
+%% iot_hub 概要: 查询平台api资源 描述:修改运维管理列表
+%% OperationId:post_operations
+%% 请求:POST /iotapi/post_operations
+do_request(post_operations, Args, #{<<"sessionToken">> := _SessionToken}, _Req) ->
+%%    dgiot_mqtt:publish(<<"">>, <<"">>, dgiot_json:decode(Args)),
+    {ok, #{<<"msg">> => <<"modify successfully">>, <<"data">> => Args}};
+
+%% iot_hub 概要: 查询平台api资源 描述:触发告警
+%% OperationId:post_triggeralarm
+%% 请求:POST /iotapi/post_triggeralarm
+do_request(post_triggeralarm, #{<<"deviceid">> := DeviceId} = Args, #{<<"sessionToken">> := _SessionToken}, _Req) ->
+%%    dgiot_mqtt:publish(<<"">>, <<"">>, dgiot_json:decode(Args)),
+    dgiot_umeng:triggeralarm(DeviceId, maps:get(<<"content">>, Args, <<>>)),
+    {ok, #{<<"msg">> => <<"trigger successfully">>, <<"data">> => Args}};
+
+
+%% System 概要: 发送短信验证码 描述:发送短信,短信验证码发送成功后,则会在缓存中写入action + mobile, 用户下一步提交时，可以根据此键查询验证通过
+%% OperationId:post_sendsms_action
+%% 请求:POST /iotapi/sendsms/:Action
+do_request(post_sendsms_code, #{<<"account">> := Account, <<"nationcode">> := NationCode}, _Context, _Req) ->
+    case dgiot_notification:send_verification_code(NationCode, Account) of
+        {error, Reason} ->
+            {500, #{code => 1, error => Reason}};
+        {ok, Map} ->
+            {ok, Map}
+    end;
+
+%% System 概要: 验证手机号/邮箱是否通过 描述:验证手机号/邮箱是否通过
+%% OperationId:post_verify_code
+%% 请求:POST /iotapi/verify_code
+do_request(post_verify_code_action, #{<<"account">> := Account, <<"code">> := Code} = Args, _Context, Req) ->
+    case dgiot_notification:check_verification_code(Account, Code) of
+        true ->
+            dgiot_verify_code:handle(Args, Req);
+        false ->
+            {400, unicode:characters_to_binary(<<"验证码未通过！"/utf8>>)}
+    end;
+
+
+%% OperationId:post_excel_id
+%% 请求:POST /iotapi/excel_id
+do_request(post_excel_id, #{<<"id">> := ChannelId, <<"data">> := Data} = _Args, Context, Req) ->
+    io:format("~s ~p ~p ~n",[?FILE, ?LINE, ChannelId]),
+    dgiot_channelx:do_message(ChannelId, {excel_data, Data, Context, Req}),
+    {ok, #{<<"id">> => ChannelId}};
+
 %%  服务器不支持的API接口
-do_request(OperationId, Args, _Context, _Req) ->
-    ?LOG(error, "do request ~p, ~p~n", [OperationId, Args]),
+do_request(_OperationId, _Args, _Context, _Req) ->
+    io:format("~s ~p Q = ~p  ~n", [?FILE, ?LINE, _Args]),
     {error, <<"Not Allowed.">>}.
 
 

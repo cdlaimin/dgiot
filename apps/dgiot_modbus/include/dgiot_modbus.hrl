@@ -12,7 +12,9 @@
     scale = 10,
     temperature = 0,
     env = <<>>,
-    dtutype = <<>>
+    dtutype = <<>>,
+    hb = 60,
+    maxaddr = 0
 }).
 
 -define(READ_DISCRETE_INPUTS, 2).
@@ -60,7 +62,7 @@
 %%|16   |写   |整型、字符型、状态字、浮点型      |
 %%——————————————————————————————————————————————
 
--record(rtu_req, {slaveId, funcode, address, registersnumber, dataByteSize, quality}).
+-record(rtu_req, {slaveId, funcode, address, registersnumber, dataByteSize, quality, data}).
 -record(rtu_pdu, {slaveId, funcode, dataByteSize, data}).
 -record(tcp_request, {sock, tid = 1, address = 1, function, start, data}).
 
@@ -133,3 +135,6 @@
 %%————————————————
 %%版权声明：本文为CSDN博主「JiaoCL」的原创文章，遵循CC 4.0 BY-SA版权协议，转载请附上原文出处链接及本声明。
 %%原文链接：https://blog.csdn.net/liboxiu/article/details/86473516
+
+-define(MODBUS_RTU, <<"MODBUSRTU">>).
+-define(MODBUS_TCP, <<"MODBUSTCP">>).

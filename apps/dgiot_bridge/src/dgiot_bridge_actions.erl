@@ -72,6 +72,18 @@
             zh => <<"消息内容模板"/utf8>>},
         description => #{en => <<"The payload template, variable interpolation is supported">>,
             zh => <<"消息内容模板，支持变量"/utf8>>}
+    },
+    republish => #{
+        order => 4,
+        type => string,
+        input => textarea,
+        required => false,
+        default => <<"channel">>,
+        enum => [<<"channel">>, <<"mqtt">>, <<"dclient">>, <<"grpc">>],
+        title => #{en => <<"republish">>,
+            zh => <<"消息重定向方法"/utf8>>},
+        description => #{en => <<"republish mode">>,
+            zh => <<"消息重定向方法"/utf8>>}
     }
 }).
 
@@ -100,9 +112,9 @@
     create => on_action_create_dgiot,
     params => ?ACTION_DATA_SPEC,
     title => #{en => <<"DGIOT CHANNEL">>,
-        zh => <<"数蛙物联网通道"/utf8>>},
+        zh => <<"DGIOT通道"/utf8>>},
     description => #{en => <<"Republish a MQTT message to dgiot channel">>,
-        zh => <<"重新发布消息到物联网通道"/utf8>>}
+        zh => <<"重新发布消息到DGIOT通道"/utf8>>}
 }).
 
 
@@ -112,15 +124,13 @@
 ]).
 
 %% callbacks for rule engine
--export([on_action_create_dgiot/2
-]).
+-export([on_action_create_dgiot/2]).
 
--export([on_action_dgiot/2
-]).
+-export([on_action_dgiot/2]).
 
 -spec(on_resource_create(binary(), map()) -> map()).
 on_resource_create(ResId, Conf) ->
-    ?LOG(error, "ResId ~p, Conf ~p", [ResId, Conf]),
+    ?LOG(debug, "ResId ~p, Conf ~p", [ResId, Conf]),
     ChannelId = maps:get(<<"channel">>, Conf, <<"">>),
     #{<<"channel">> => ChannelId}.
 
@@ -129,7 +139,7 @@ on_get_resource_status(_ResId, _Conf) ->
     #{is_alive => true}.
 
 on_resource_destroy(ResId, Conf) ->
-    ?LOG(error, "on_resource_destroy ~p,~p", [ResId, Conf]),
+    ?LOG(debug, "on_resource_destroy ~p,~p", [ResId, Conf]),
     case catch emqx_rule_registry:remove_resource(ResId) of
         {'EXIT', {{throw, {dependency_exists, {rule, RuleId}}}, _}} ->
             ok = emqx_rule_registry:remove_rule(RuleId),
@@ -142,15 +152,8 @@ on_resource_destroy(ResId, Conf) ->
 %% Action 'dgiot'
 %%------------------------------------------------------------------------------
 -spec on_action_create_dgiot(action_instance_id(), Params :: map()) -> {bindings(), NewParams :: map()}.
-on_action_create_dgiot(_Id, Params = #{
-    <<"target_topic">> := TargetTopic,
-    <<"target_qos">> := _TargetQoS,
-    <<"payload_tmpl">> := PayloadTmpl
-}) ->
-    TopicTks = emqx_rule_utils:preproc_tmpl(TargetTopic),
-    PayloadTks = emqx_rule_utils:preproc_tmpl(PayloadTmpl),
-    ?LOG(error, " msg topic: ~p, payload: ~p", [TopicTks, PayloadTks]),
-    Params.
+on_action_create_dgiot(_Id, Envs) ->
+    Envs.
 
 %% mqtt事件
 %%[ 'client.connected'
@@ -163,28 +166,23 @@ on_action_create_dgiot(_Id, Params = #{
 %%, 'message.dropped'
 %%]
 -spec on_action_dgiot(selected_data(), env_vars()) -> any().
-on_action_dgiot(Selected, #{event := Event} = Envs) ->
+on_action_dgiot(Selected, Envs = #{?BINDING_KEYS := #{'_Id' := ActId}, event := Event} = Envs) ->
     ChannelId = dgiot_mqtt:get_channel(Envs),
     Msg = dgiot_mqtt:get_message(Selected, Envs),
-%%    io:format("Event = ~p.~n", [Event]),
-%%    io:format("Msg = ~p.~n", [Msg]),
     case Event of
         'message.publish' ->
-            post_rule(Msg),
-            case dgiot_channelx:do_message(ChannelId, {rule, Msg, Selected}) of
-                not_find -> dgiot_mqtt:republish(Selected, Envs);
-                _ -> pass
+            case Msg of
+                #{republish_mod := <<"mqtt">>} ->
+                    dgiot_mqtt:republish(Msg);
+                #{republish_mod := <<"dclient">>, topic := Topic, payload := Payload, deviceid := DeviceId} ->
+%%                    io:format("ChannelId = ~p, DeviceId = ~p, Topic = ~p , Payload =  ~p ~n",[ChannelId, DeviceId, Topic, Payload]),
+                    dgiot_client:send(ChannelId, DeviceId, Topic, dgiot_json:decode(Payload));
+                _ ->
+                    dgiot_channelx:do_message(ChannelId, {rule, Msg, Selected})
             end;
-        EventId ->
+        EventId -> % 'client.connected', 'client.disconnected',  'session.subscribed', 'session.unsubscribed','message.delivered','message.acked','message.dropped'
             dgiot_channelx:do_event(ChannelId, EventId, {rule, Msg, Selected})
-    end.
+    end,
+    emqx_rule_metrics:inc_actions_success(ActId).
 
-%% SELECT payload, payload.dump_energy as dump_energy, clientid, 'productid' as productid FROM "notification/c1e44b39f0/868615051803274/#" WHERE dump_energy < 90
-post_rule(#{metadata := #{rule_id := <<"rule:Notification_", Ruleid/binary>>}, clientid := DevAddr, payload := Payload, topic := _Topic}) ->
-%%    ?LOG(info, "Msg ~p", [Msg]),
-    NewPayload = jsx:decode(Payload, [{labels, binary}, return_maps]),
-    dgiot_umeng:add_notification(Ruleid, DevAddr, NewPayload);
 
-post_rule(Msg) ->
-%%    io:format("~s ~p Msg = ~p.~n", [?FILE, ?LINE, Msg]),
-    ?LOG(error, "~s ~p Msg = ~p.~n", [?FILE, ?LINE, Msg]).

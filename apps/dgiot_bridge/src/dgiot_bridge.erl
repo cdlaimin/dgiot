@@ -23,21 +23,22 @@
 -export([init_ets/0]).
 
 %% API
--export([start/0, start_channel/2, register_channel/2, get_behaviour/1, start_channel/3, do_global_message/1]).
+-export([start/0, start_channel/2, start_channel/3, register_channel/2, get_behaviour/1, do_global_message/1]).
 -export([get_product_info/1, get_products/1, get_acl/1, apply_channel/5, apply_product/3, parse_frame/3, to_frame/3]).
 -export([get_data/2, send_log/3, send_log/4, send_log/5]).
--export([get_all_channel/0, control_channel/2, list/0]).
+-export([get_all_channel/0, control_channel/2, list/0, get_proctol_channel/1, control_uniapp/2, uniapp_report/1]).
 
 init_ets() ->
     dgiot_data:init(?DGIOT_BRIDGE),
     dgiot_data:init(?DGIOT_RUlES),
+    dgiot_data:init(?DGIOT_PRODUCT_CHANNEL),
     register_all_channel(),
-    dgiot_hook:add(<<"global/dgiot">>, fun ?MODULE:do_global_message/1),
-    proc_lib:spawn_link(
-        fun() ->
-            timer:sleep(10000),
-            dgiot_bridge:start()
-        end).
+    dgiot_hook:add(<<"global/dgiot">>, fun ?MODULE:do_global_message/1).
+%%    proc_lib:spawn_link(
+%%        fun() ->
+%%            timer:sleep(10000),
+%%            dgiot_bridge:start()
+%%        end).
 
 start() ->
     load_channel().
@@ -45,6 +46,7 @@ start() ->
 start_channel(Name, Filter) ->
     dgiot_bridge_loader:start(Name, Filter,
         fun(Module, Channel) ->
+            timer:sleep(100),
             dgiot_bridge_server ! {start_channel, Module, Channel}
         end).
 
@@ -65,7 +67,6 @@ parse_frame(ProductId, Bin, State) ->
 
 to_frame(ProductId, Msg, State) ->
     apply_product(ProductId, to_frame, [Msg, State]).
-
 
 %% 对产品编码器依次调用
 apply_channel(_ChannelId, [], _Fun, _Args, Env) ->
@@ -105,18 +106,22 @@ apply_channel(ChannelId, ProductId, Fun, Args, Env) ->
 
 apply_product(ProductId, Fun, Args) ->
     Mod = binary_to_atom(ProductId, utf8),
-    case erlang:function_exported(Mod, Fun, length(Args)) of
+    case erlang:module_loaded(Mod) of
         true ->
-            case catch apply(Mod, Fun, Args) of
-                {'EXIT', Reason} ->
-                    {error, Reason};
-                Result ->
-                    Result
+            case erlang:function_exported(Mod, Fun, length(Args)) of
+                true ->
+                    case catch apply(Mod, Fun, Args) of
+                        {'EXIT', Reason} ->
+                            {error, Reason};
+                        Result ->
+                            Result
+                    end;
+                false ->
+                    {error, function_not_exported}
             end;
         false ->
             {error, function_not_exported}
     end.
-
 
 get_product_info(ProductId) ->
     dgiot_product:local(ProductId).
@@ -135,6 +140,13 @@ get_products(ChannelId) ->
             {ok, Type, ProductIds}
     end.
 
+get_proctol_channel(ProductId) ->
+    case dgiot_data:get(?DGIOT_PRODUCT_CHANNEL, ProductId) of
+        not_find ->
+            [];
+        Proctols ->
+            Proctols
+    end.
 
 get_acl(ChannelId) ->
     case ets:info(?DGIOT_BRIDGE) of
@@ -152,7 +164,7 @@ get_acl(ChannelId) ->
 send_log(ChannelId, ProductId, DevAddr, Fmt, Args) ->
     is_send_log(ChannelId, ProductId, DevAddr,
         fun() ->
-            Topic = <<"log/channel/", ChannelId/binary, "/", ProductId/binary, "/", DevAddr/binary>>,
+            Topic = <<"$dg/user/channel/", ChannelId/binary, "/", ProductId/binary, "/", DevAddr/binary>>,
             Payload = io_lib:format("[~s]~p " ++ Fmt, [node(), self() | Args]),
             dgiot_mqtt:publish(ChannelId, Topic, unicode:characters_to_binary(Payload))
         end).
@@ -160,7 +172,7 @@ send_log(ChannelId, ProductId, DevAddr, Fmt, Args) ->
 send_log(ChannelId, ProductId, Fmt, Args) ->
     is_send_log(ChannelId, ProductId, undefined,
         fun() ->
-            Topic = <<"log/channel/", ChannelId/binary, "/", ProductId/binary>>,
+            Topic = <<"$dg/user/channel/", ChannelId/binary, "/", ProductId/binary>>,
             Payload = io_lib:format("[~s]~p " ++ Fmt, [node(), self() | Args]),
             dgiot_mqtt:publish(ChannelId, Topic, unicode:characters_to_binary(Payload))
         end).
@@ -168,7 +180,7 @@ send_log(ChannelId, ProductId, Fmt, Args) ->
 send_log(ChannelId, Fmt, Args) ->
     is_send_log(ChannelId, undefined, undefined,
         fun() ->
-            Topic = <<"log/channel/", ChannelId/binary, "/channelid">>,
+            Topic = <<"$dg/user/channel/", ChannelId/binary, "/channelid">>,
             Payload = io_lib:format("[~s]~p " ++ Fmt, [node(), self() | Args]),
             dgiot_mqtt:publish(ChannelId, Topic, unicode:characters_to_binary(Payload))
         end).
@@ -181,7 +193,6 @@ get_data(ProductId, DevAddr) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
-
 is_send_log(ChannelId, ProductId, DevAddr, Fun) ->
     Now = dgiot_datetime:nowstamp(),
     case dgiot_data:lookup(?DGIOT_BRIDGE, {ChannelId, log}) of
@@ -206,7 +217,7 @@ is_send_log(ChannelId, ProductId, DevAddr, Fun) ->
 
 load_channel() ->
     case application:get_env(dgiot_bridge, filters) of
-        {ok, Filters} when length(Filters) > 0  ->
+        {ok, Filters} when length(Filters) > 0 ->
             lists:foreach(
                 fun(Data) ->
                     Json = list_to_binary(Data),
@@ -214,7 +225,6 @@ load_channel() ->
                         false ->
                             ?LOG(error, "~p is not json.", [Json]);
                         Filter ->
-                            ?LOG(error, "Filter: ~p", [Filter]),
                             start_channel(dgiot_bridge, Filter)
                     end
                 end, Filters);
@@ -260,6 +270,20 @@ format_channel(App, CType, Channel_type, Attributes) ->
         cType => CType,
         app => App,
         params => maps:merge(#{
+            <<"Node">> => #{
+                order => 99,
+                type => string,
+                required => false,
+                default => <<"all"/utf8>>,
+                title => #{
+                    en => <<"Node">>,
+                    zh => <<"节点"/utf8>>
+                },
+                description => #{
+                    en => <<"Node start">>,
+                    zh => <<"指定节点启动"/utf8>>
+                }
+            },
             <<"Size">> => #{
                 order => 1,
                 type => integer,
@@ -267,25 +291,11 @@ format_channel(App, CType, Channel_type, Attributes) ->
                 default => 1,
                 title => #{
                     en => <<"Size">>,
-                    zh => <<"池子大小"/utf8>>
+                    zh => <<"消费组"/utf8>>
                 },
                 description => #{
                     en => <<"Pool Size">>,
-                    zh => <<"进程池子数量"/utf8>>
-                }
-            },
-            <<"MaxOverFlow">> => #{
-                order => 101,
-                type => integer,
-                required => false,
-                default => 10,
-                title => #{
-                    en => <<"MaxOverFlow">>,
-                    zh => <<"最大溢出"/utf8>>
-                },
-                description => #{
-                    en => <<"MaxOverFlow">>,
-                    zh => <<"最大溢出"/utf8>>
+                    zh => <<"通道消费组进程数量"/utf8>>
                 }
             },
             <<"ico">> => #{
@@ -322,28 +332,68 @@ list() ->
         end,
     lists:sort(dgiot_plugin:check_module(Fun, [])).
 
-control_channel(ChannelId, Action) ->
-    IsEnable =
+control_channel(#{<<"id">> := ChannelId, <<"action">> := <<"start_logger">>, <<"productid">> := Productid, <<"devaddr">> := Devaddr}, SessionToken) when Devaddr =/= undefined ->
+    dgiot_mqtt:subscribe_route_key([<<"$dg/user/channel/", ChannelId/binary, "/", Productid/binary, "/", Devaddr/binary, "/#">>], <<"channel">>, SessionToken),
+    Topic = <<"channel/", ChannelId/binary>>,
+    Payload = dgiot_json:encode(#{<<"channelId">> => ChannelId, <<"productId">> => Productid, <<"devaddr">> => Devaddr, <<"action">> => <<"start_logger">>}),
+    dgiot_mqtt:publish(ChannelId, Topic, Payload),
+    {ok, #{}};
+
+control_channel(#{<<"id">> := ChannelId, <<"action">> := <<"start_logger">>, <<"productid">> := Productid}, SessionToken) when Productid =/= undefined ->
+    dgiot_mqtt:subscribe_route_key([<<"$dg/user/channel/", ChannelId/binary, "/", Productid/binary, "/#">>], <<"channel">>, SessionToken),
+    Topic = <<"channel/", ChannelId/binary>>,
+    Payload = dgiot_json:encode(#{<<"channelId">> => ChannelId, <<"productId">> => Productid, <<"action">> => <<"start_logger">>}),
+    dgiot_mqtt:publish(ChannelId, Topic, Payload),
+    {ok, #{}};
+
+control_channel(#{<<"id">> := ChannelId, <<"action">> := Action}, SessionToken) ->
+    {IsEnable, Result} =
         case Action of
             <<"disable">> ->
                 Topic = <<"channel/", ChannelId/binary>>,
-                Payload = jsx:encode(#{<<"enable">> => false}),
+                Payload = dgiot_json:encode(#{<<"enable">> => false}),
                 dgiot_mqtt:publish(ChannelId, Topic, Payload),
-                false;
+                {false, <<"success">>};
             <<"enable">> ->
+                Payload = dgiot_json:encode(#{<<"channelId">> => ChannelId, <<"enable">> => true}),
                 Topic = <<"global/dgiot">>,
-                Payload = jsx:encode(#{<<"channelId">> => ChannelId, <<"enable">> => true}),
-                dgiot_mqtt:publish(ChannelId, Topic, Payload),
-                true;
+                case dgiot_parsex:get_object(<<"Channel">>, ChannelId) of
+                    {ok, #{<<"config">> := #{<<"ip">> := _IP}}} ->
+                        dgiot_mqtt:publish(ChannelId, Topic, Payload),
+                        {true, <<"success">>};
+                    {ok, #{<<"config">> := #{<<"port">> := Port}, <<"type">> := <<"1">>}} ->
+                        case dgiot_utils:check_port(dgiot_utils:to_int(Port)) of
+                            true ->
+                                {true, <<"port conflict">>};
+                            _ ->
+                                dgiot_mqtt:publish(ChannelId, Topic, Payload),
+                                {true, <<"success">>}
+                        end;
+                    _ ->
+                        dgiot_mqtt:publish(ChannelId, Topic, Payload),
+                        {true, <<"success">>}
+                end;
             <<"update">> ->
                 Topic = <<"channel/", ChannelId/binary>>,
-                Payload = jsx:encode(#{<<"channelId">> => ChannelId, <<"action">> => <<"update">>}),
+                Payload = dgiot_json:encode(#{<<"channelId">> => ChannelId, <<"action">> => <<"update">>}),
                 dgiot_mqtt:publish(ChannelId, Topic, Payload),
-                true
+                {true, <<"success">>};
+            <<"start_logger">> ->
+                dgiot_mqtt:subscribe_route_key([<<"$dg/user/channel/", ChannelId/binary, "/#">>], <<"channel">>, SessionToken),
+                Topic = <<"channel/", ChannelId/binary>>,
+                Payload = dgiot_json:encode(#{<<"channelId">> => ChannelId, <<"action">> => <<"start_logger">>}),
+                dgiot_mqtt:publish(ChannelId, Topic, Payload),
+                {true, <<"success">>};
+            <<"stop_logger">> ->
+                dgiot_mqtt:unsubscribe_route_key(SessionToken, <<"channel">>),
+                Topic = <<"channel/", ChannelId/binary>>,
+                Payload = dgiot_json:encode(#{<<"channelId">> => ChannelId, <<"action">> => <<"stop_logger">>}),
+                dgiot_mqtt:publish(ChannelId, Topic, Payload),
+                {true, <<"success">>}
         end,
     Fun =
         fun() ->
-            case dgiot_parse:get_object(<<"Channel">>, ChannelId) of
+            case dgiot_parsex:get_object(<<"Channel">>, ChannelId) of
                 {ok, #{<<"status">> := Status}} ->
                     case IsEnable of
                         true -> Status == <<"ONLINE">>;
@@ -353,16 +403,22 @@ control_channel(ChannelId, Action) ->
                     false
             end
         end,
-    case dgiot_parse:update_object(<<"Channel">>, ChannelId, #{<<"isEnable">> => IsEnable}) of
-        {ok, Update} ->
-            case wait_request(30000, Fun) of
-                false -> {500, #{}};
-                true -> {ok, Update}
+    case Result of
+        <<"success">> ->
+            case dgiot_parsex:update_object(<<"Channel">>, ChannelId, #{<<"isEnable">> => IsEnable}) of
+                {ok, Update} ->
+                    case wait_request(30000, Fun) of
+                        false ->
+                            {500, #{}};
+                        true ->
+                            {ok, Update}
+                    end;
+                {error, Reason} ->
+                    {error, Reason}
             end;
-        {error, Reason} ->
-            {error, Reason}
+        Reason ->
+            {200, #{<<"message">> => Reason, <<"type">> => <<"error">>}}
     end.
-
 
 wait_request(Time, _) when Time =< 0 ->
     false;
@@ -377,3 +433,36 @@ wait_request(Time, Fun) ->
                 Result
         end
     end.
+
+control_uniapp(#{<<"instruct">> := _Instruct} = Args, SessionToken) ->
+    Topic = <<"$dg/user/uniapp/", SessionToken/binary, "/report">>,
+    dgiot_mqtt:publish(SessionToken, Topic, dgiot_json:encode(Args)),
+    {ok, #{<<"code">> => 200, <<"msg">> => <<"success">>}};
+
+control_uniapp(_Args, _SessionToken) ->
+    pass.
+
+%% 拍照
+uniapp_report({_Token, #{<<"instruct">> := <<"photo">>, <<"deviceid">> := DeviceId, <<"url">> := Url} = _Payload}) ->
+    case dgiot_parsex:get_object(<<"Device">>, DeviceId) of
+        {ok, #{<<"objectId">> := DeviceId} = Device} ->
+            Content = maps:get(<<"content">>, Device, #{}),
+            dgiot_parsex:update_object(<<"Device">>, DeviceId, #{<<"content">> => Content#{<<"app_photo">> => Url}});
+        _ ->
+            pass
+    end;
+
+%% 扫码
+uniapp_report({_Token, #{<<"instruct">> := <<"scancode">>, <<"deviceid">> := DeviceId, <<"url">> := Url} = _Payload}) ->
+    case dgiot_parsex:get_object(<<"Device">>, DeviceId) of
+        {ok, #{<<"objectId">> := DeviceId} = Device} ->
+            Content = maps:get(<<"content">>, Device, #{}),
+            dgiot_parsex:update_object(<<"Device">>, DeviceId, #{<<"content">> => Content#{<<"app_scancode">> => Url}});
+        _ ->
+            pass
+    end;
+
+uniapp_report({_Token, _Payload}) ->
+%%    io:format("~s ~p Payload = ~p.~n", [?FILE, ?LINE, Payload]),
+    pass.
+

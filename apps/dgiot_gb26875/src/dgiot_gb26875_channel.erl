@@ -19,7 +19,11 @@
 -include_lib("dgiot_bridge/include/dgiot_bridge.hrl").
 -include("dgiot_gb26875.hrl").
 -include_lib("dgiot/include/logger.hrl").
--define(TYPE, <<"gb26875">>).
+-define(TYPE, <<"GB26875">>).
+-dgiot_data("ets").
+-export([init_ets/0]).
+-dgiot_channel(?MODULE).
+
 %% API
 -export([start/2]).
 
@@ -34,7 +38,7 @@
         zh => <<"GB26875"/utf8>>
     },
     description => #{
-        zh => <<"gb26875"/utf8>>
+        zh => <<"GB26875"/utf8>>
     }
 }).
 %% 注册通道参数
@@ -43,7 +47,7 @@
         order => 1,
         type => integer,
         required => true,
-        default => 20110,
+        default => 7533,
         title => #{
             zh => <<"端口"/utf8>>
         },
@@ -51,47 +55,23 @@
             zh => <<"侦听端口"/utf8>>
         }
     },
-    <<"regtype">> => #{
+    <<"devtype">> => #{
         order => 2,
         type => string,
         required => true,
-        default => <<"上传Mac"/utf8>>,
+        default => <<"消防电子"/utf8>>,
         title => #{
-            zh => <<"注册类型"/utf8>>
+            zh => <<"消防电子"/utf8>>
         },
         description => #{
-            zh => <<"上传Mac"/utf8>>
-        }
-    },
-    <<"regular">> => #{
-        order => 3,
-        type => string,
-        required => true,
-        default => <<"9C-A5-25-**-**-**">>,
-        title => #{
-            zh => <<"登录报文帧头"/utf8>>
-        },
-        description => #{
-            zh => <<"填写正则表达式匹配login"/utf8>>
-        }
-    },
-    <<"dtutype">> => #{
-        order => 4,
-        type => string,
-        required => true,
-        default => <<"usr">>,
-        title => #{
-            zh => <<"控制器厂商"/utf8>>
-        },
-        description => #{
-            zh => <<"控制器厂商"/utf8>>
+            zh => <<"厂家名称"/utf8>>
         }
     },
     <<"ico">> => #{
         order => 102,
         type => string,
         required => false,
-        default => <<"http://dgiot-1253666439.cos.ap-shanghai-fsi.myqcloud.com/shuwa_tech/zh/product/dgiot/channel/modbus.png">>,
+        default => <<"/dgiot_file/shuwa_tech/zh/product/dgiot/channel/gb26875_channel.png">>,
         title => #{
             en => <<"channel ICO">>,
             zh => <<"通道ICO"/utf8>>
@@ -103,36 +83,34 @@
     }
 }).
 
+init_ets() ->
+    dgiot_data:init(?GB26875_ETS).
+
 start(ChannelId, ChannelArgs) ->
     dgiot_channelx:add(?TYPE, ChannelId, ?MODULE, ChannelArgs).
 
 %% 通道初始化
 init(?TYPE, ChannelId, #{
     <<"port">> := Port,
-    <<"regtype">> := Type,
-    <<"regular">> := Regular,
-    <<"product">> := Products,
-    <<"dtutype">> := Dtutype
+    <<"devtype">> := DevType
 } = _Args) ->
-    [{ProdcutId, App} | _] = get_app(Products),
-    {Header, Len} = get_header(Regular),
     State = #state{
         id = ChannelId,
-        regtype = Type,
-        head = Header,
-        len = Len,
-        app = App,
-        product = ProdcutId,
-        dtutype = Dtutype
+        devtype = DevType
     },
-
-%%    dgiot_data:insert({ChannelId, heartbeat}, {Heartbeat, Port}),
-    {ok, State, dgiot_gb26875_tcp:start(Port, State)};
+    case dgiot_parse:get_object(<<"Channel">>, ChannelId) of
+        {ok, Channel} ->
+            App = get_app(Channel),
+            {ok, State, dgiot_gb26875_tcp:start(Port, State#state{app = App})};
+        _ ->
+            {ok, State, []}
+    end;
 
 init(?TYPE, _ChannelId, _Args) ->
     {ok, #{}, #{}}.
 
 handle_init(State) ->
+    dgiot_gb26875:load_thing(),
     {ok, State}.
 
 %% 通道消息处理,注意：进程池调用
@@ -160,26 +138,14 @@ handle_message(_Message, State) ->
 stop(_ChannelType, _ChannelId, _State) ->
     ok.
 
-get_app(Products) ->
-    lists:map(fun({ProdcutId, #{<<"ACL">> := Acl}}) ->
-        Predicate = fun(E) ->
-            case E of
-                <<"role:", _/binary>> -> true;
-                _ -> false
-            end
-                    end,
-        [<<"role:", App/binary>> | _] = lists:filter(Predicate, maps:keys(Acl)),
-        {ProdcutId, App}
-              end, Products).
-
-
-
-get_header(Regular) ->
-    lists:foldl(fun(X, {Header, Len}) ->
-        case X of
-            "**" -> {Header, Len + length(X)};
-            "*" -> {Header, Len + length(X)};
-            _ -> {Header ++ X, Len + length(X)}
+get_app(#{<<"ACL">> := Acl}) ->
+    Predicate = fun(E) ->
+        case E of
+            <<"role:", _/binary>> -> true;
+            _ -> false
         end
-                end, {[], 0},
-        re:split(dgiot_utils:to_list(Regular), "-", [{return, list}])).
+                end,
+    [<<"role:", App/binary>> | _] = lists:filter(Predicate, maps:keys(Acl)),
+    App.
+
+

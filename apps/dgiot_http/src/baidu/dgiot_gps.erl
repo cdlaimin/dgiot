@@ -38,6 +38,8 @@
 -compile(nowarn_deprecated_function).
 -export([
     bd09togcj02/2,
+    bd09towgs84/2,
+    wgs84tobd09/2,
     gcj02tobd09/2,
     wgs84togcj02/2,
     wgs84togcj02/4,
@@ -45,11 +47,15 @@
     get_baidu_addr/4,
     get_baidu_addr/2,
     out_of_china/2,
+    get_gpsaddr/1,
     get_baidu_gps/2,
     get_baidu_gps/4,
     get_deng_gps/2,
     generate_random_gps/3,
-    nmea0183_frame/1
+    nmea0183_frame/1,
+    towgs84/2,
+    fromwgs84/2,
+    get_ip_addr/1
 ]).
 
 %%// 定义一些常量
@@ -91,6 +97,27 @@ bd09togcj02(Bd_lng, Bd_lat) ->
     Gg_lat = Z * math:sin(Theta),
     [Gg_lng, Gg_lat].
 
+%**
+%* 百度坐标系 (BD-09) 与 国际通用坐标系 (WGS-84) 的转换
+%* 即 百度 转 国际通用坐标系
+%* @param bd_lng
+%* @param bd_lat
+%* @returns {*[]}
+%*/
+bd09towgs84(Bd_lng, Bd_lat) ->
+    [Lng, Lat] = bd09togcj02(Bd_lng, Bd_lat),
+    gcj02towgs84(Lng, Lat).
+
+%**
+%* 国际通用坐标系 (WGS-84) 与 百度坐标系 (BD-09) 的转换
+%* 即 国际通用坐标系 转 百度
+%* @param bd_lng
+%* @param bd_lat
+%* @returns {*[]}
+%*/
+wgs84tobd09(Bd_lng, Bd_lat) ->
+    [Lng, Lat] = wgs84togcj02(Bd_lng, Bd_lat),
+    gcj02tobd09(Lng, Lat).
 
 %**
 %* 火星坐标系 (GCJ-02) 与百度坐标系 (BD-09) 的转换
@@ -141,8 +168,11 @@ gcj02tobd09(Lng, Lat) ->
 %%}
 %%};
 wgs84togcj02(Lng, Lat) ->
+    Latoffset = dgiot_utils:to_float(application:get_env(dgiot_http, baidumap_latoffset, <<"-0.0002">>)),
+    Lngoffset = dgiot_utils:to_float(application:get_env(dgiot_http, baidumap_lngoffset, <<"-0.0000">>)),
     case out_of_china(Lng, Lat) of
-        true -> [Lng, Lat];
+        true ->
+            [dgiot_utils:to_float(Lng + Lngoffset, 6), dgiot_utils:to_float(Lat + Latoffset, 6)];
         false ->
             Dlat = transformlat(Lng - 105.0, Lat - 35.0),
             Dlng = transformlng(Lng - 105.0, Lat - 35.0),
@@ -154,7 +184,7 @@ wgs84togcj02(Lng, Lat) ->
             Dlng1 = (Dlng * 180.0) / (?A / Sqrtmagic * math:cos(Radlat) * ?PI),
             Mglat = Lat + Dlat1,
             Mglng = Lng + Dlng1,
-            [Mglng, Mglat]
+            [dgiot_utils:to_float(Mglng + Lngoffset, 6), dgiot_utils:to_float(Mglat + Latoffset, 6)]
     end.
 
 wgs84togcj02(Lng, Lat, Lonoffset, Latoffset) ->
@@ -260,6 +290,19 @@ transformlng(Lng, Lat) ->
 out_of_china(Lng, Lat) ->
     not ((Lng > 73.66) and (Lng < 135.05) and (Lat > 3.86) and (Lat < 53.55)).
 
+get_gpsaddr(V) ->
+    BinV = dgiot_utils:to_binary(V),
+    case binary:split(BinV, <<$_>>, [global, trim]) of
+        [Longitude, Latitude] ->
+            case get_baidu_addr(Longitude, Latitude) of
+                #{<<"baiduaddr">> := #{<<"formatted_address">> := FormattedAddress}} ->
+                    FormattedAddress;
+                _ ->
+                    <<"[", BinV/binary, "]经纬度解析错误"/utf8>>
+            end;
+        _ ->
+            <<"无GPS信息"/utf8>>
+    end.
 
 %**
 %* 度分格式转度分秒格式
@@ -280,9 +323,12 @@ get_deng_gps(Lng, Lat) ->
     [LngDeg, LatDeg].
 
 get_baidu_gps(LonDeg, LatDeg) ->
+    Latoffset = dgiot_utils:to_float(application:get_env(dgiot_http, baidumap_latoffset, <<"-0.0002">>)),
+    Lngoffset = dgiot_utils:to_float(application:get_env(dgiot_http, baidumap_lngoffset, <<"-0.0000">>)),
     [Mglng, Mglat] = wgs84togcj02(LonDeg, LatDeg),
     [Bd_lng, Bd_lat] = gcj02tobd09(Mglng, Mglat),
-    [dgiot_utils:to_float(Bd_lng, 6), dgiot_utils:to_float(Bd_lat - 0.0002, 6)].
+%%    定位偏移值，使用当前gps解析值，加上偏移值，偏移值可为负数
+    [dgiot_utils:to_float(Bd_lng + Lngoffset, 6), dgiot_utils:to_float(Bd_lat + Latoffset, 6)].
 
 get_baidu_gps(LonDeg, LatDeg, Lonoffset, Latoffset) ->
     [Mglng, Mglat] = wgs84togcj02(LonDeg, LatDeg),
@@ -290,9 +336,15 @@ get_baidu_gps(LonDeg, LatDeg, Lonoffset, Latoffset) ->
     [dgiot_utils:to_float(Bd_lng + Lonoffset, 6), dgiot_utils:to_float(Bd_lat + Latoffset, 6)].
 
 %%http://lbsyun.baidu.com/index.php?title=webapi/guide/webservice-geocoding-abroad
-%<<"http://api.map.baidu.com/reverse_geocoding/v3/?ak=fnc5Z92jC7CwfBGz8Dk66E9sXEIYZ6TG&output=json&coordtype=wgs84ll&location=30.26626,119.60223">>.
+%<<"http://api.map.baidu.com/reverse_geocoding/v3/?ak=0twrgSghSF1Q6zUvvYdUu2KFhFiGdbm5&output=json&coordtype=wgs84ll&location=25.368078,111.064845">>.
 get_baidu_addr(LonDeg, LatDeg) ->
-    AppKey = dgiot_utils:to_binary(application:get_env(dgiot_http, baidumap_appkey, <<"">>)),
+    AppKey =
+        case dgiot_data:get(dgiot_configuration, baidu_sak) of
+            not_find ->
+                dgiot_utils:to_binary(application:get_env(dgiot_http, baidumap_appkey, <<"">>));
+            Ak ->
+                Ak
+        end,
     get_baidu_addr(AppKey, "wgs84ll", LonDeg, LatDeg).
 
 get_baidu_addr(AK, Coordtype, Lng, Lat) ->
@@ -314,6 +366,22 @@ get_baidu_addr(AK, Coordtype, Lng, Lat) ->
             end;
         _Error ->
             #{}
+    end.
+
+get_ip_addr(Ip) ->
+    AppKey =
+        case dgiot_data:get(dgiot_configuration, baidu_sak) of
+            not_find ->
+                dgiot_utils:to_binary(application:get_env(dgiot_http, baidumap_appkey, <<"">>));
+            Ak ->
+                Ak
+        end,
+    Url = "https://api.map.baidu.com/location/ip?ip=" ++ dgiot_utils:to_list(Ip) ++ "&coor=bd09ll&ak=" ++ dgiot_utils:to_list(AppKey),
+    case dgiot_http_client:request(get, {Url, []}) of
+        {ok, #{<<"status">> := 0, <<"content">> := #{<<"address">> := Address}}} ->
+            Address;
+        _Error ->
+            Ip
     end.
 
 %%#  参数含义
@@ -355,3 +423,25 @@ nmea0183_frame(<<"$GNRMC,", Data:60/binary, "*", _Checksum:2/binary, _/binary>>)
 nmea0183_frame(Buff) ->
     ?LOG(info, "Buff ~p~n", [Buff]),
     <<"">>.
+
+towgs84(#{<<"longitude">> := Longitude, <<"latitude">> := Latitude}, <<"baidu">>) ->
+    [Mglng, Mglat] = bd09towgs84(dgiot_utils:to_float(Longitude), dgiot_utils:to_float(Latitude)),
+    #{<<"__type">> => <<"GeoPoint">>, <<"longitude">> => Mglng, <<"latitude">> => Mglat};
+
+towgs84(#{<<"longitude">> := Longitude, <<"latitude">> := Latitude}, <<"gcj">>) ->
+    [Mglng, Mglat] = gcj02towgs84(dgiot_utils:to_float(Longitude), dgiot_utils:to_float(Latitude)),
+    #{<<"__type">> => <<"GeoPoint">>, <<"longitude">> => Mglng, <<"latitude">> => Mglat};
+
+towgs84(Location, _MapType) ->
+    Location.
+
+fromwgs84(#{<<"longitude">> := Longitude, <<"latitude">> := Latitude}, <<"baidu">>) ->
+    [Mglng, Mglat] = get_baidu_gps(dgiot_utils:to_float(Longitude), dgiot_utils:to_float(Latitude)),
+    #{<<"__type">> => <<"GeoPoint">>, <<"longitude">> => Mglng, <<"latitude">> => Mglat};
+
+fromwgs84(#{<<"longitude">> := Longitude, <<"latitude">> := Latitude}, <<"gcj">>) ->
+    [Mglng, Mglat] = wgs84togcj02(dgiot_utils:to_float(Longitude), dgiot_utils:to_float(Latitude)),
+    #{<<"__type">> => <<"GeoPoint">>, <<"longitude">> => Mglng, <<"latitude">> => Mglat};
+
+fromwgs84(Location, _MapType) ->
+    Location.

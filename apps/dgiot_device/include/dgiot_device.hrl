@@ -15,7 +15,13 @@
 %%--------------------------------------------------------------------
 
 -define(DGIOT_PRODUCT, dgiot_product).
+-define(DGIOT_PRODUCT_IDENTIFIE, dgiot_product_identifie).
+-define(DGIOT_PRODUCT_STAB, dgiot_product_stab).
+-define(DEVICE_PROFILE, dgiot_device_profile).
+-define(DEVICE_DEVICE_COLOR, dgiot_device_color).
+-define(DGIOT_CHANNEL_SESSION, dgiot_channel_session).
 
 -define(LOCAL, smartdev).
 -define(VCON, 0).
 -define(DEV, 1).
+-define(DGIOT_LOCATION_ADDRESS, dgiot_location_address).

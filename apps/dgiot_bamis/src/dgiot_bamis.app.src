@@ -1,0 +1,15 @@
+{application, dgiot_bamis,
+    [{description, "DGIOT AMIS"},
+        {vsn, "4.3.0"},
+        {registered, [dgiot_bamis_sup]},
+        {mod, {dgiot_bamis_app, []}},
+        {applications, [kernel, stdlib, dgiot_api]},
+        {env, []},
+        {modules, []},
+        {licenses, ["Apache-2.0"]},
+        {maintainers, ["DGIOT Team"]},
+        {links, [{"Homepage", "https://www.dgiotcloud.cn/"},
+            {"Github", "https://github.com/dgiot/dgiot"}
+        ]}
+    ]
+}.

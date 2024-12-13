@@ -22,7 +22,7 @@
 
 %% API
 -export([swagger_system/0]).
--export([handle/4, arrtojsonlist/1, python_drawxnqx/2]).
+-export([handle/4, post_report/2]).
 
 %% API描述
 %% 支持二种方式导入
@@ -72,7 +72,6 @@ handle(OperationID, Args, Context, Req) ->
 %%% 内部函数 Version:API版本
 %%%===================================================================
 do_request(post_evidence, Args, #{<<"sessionToken">> := SessionToken} = _Context, _Req) ->
-    ?LOG(info, "Args ~p ", [Args]),
     case dgiot_evidence:post(Args#{<<"sessionToken">> => SessionToken}) of
         {ok, Result} ->
             {ok, Result};
@@ -80,8 +79,7 @@ do_request(post_evidence, Args, #{<<"sessionToken">> := SessionToken} = _Context
             {500, Reason}
     end;
 
-do_request(put_evidence, #{<<"status">> := Status} = Args, #{<<"sessionToken">> := SessionToken} = _Context, Req) ->
-    ?LOG(info, "Status ~p ", [Status]),
+do_request(put_evidence, #{<<"status">> := _Status} = Args, #{<<"sessionToken">> := SessionToken} = _Context, Req) ->
     Host = dgiot_req:host(Req),
     dgiot_evidence:put(Args#{<<"ip">> => Host}, SessionToken);
 
@@ -133,7 +131,7 @@ do_request(post_bed, _Body, #{<<"sessionToken">> := SessionToken} = _Context, _R
 %% 请求:POST /iotapi/testpaper
 do_request(post_testpaper, #{<<"productid">> := Productid, <<"file">> := FileInfo},
     #{<<"sessionToken">> := _SessionToken} = _Context, _Req) ->
-    {ok, get_paper(Productid, FileInfo)};
+    {ok, dgiot_paper:get_paper(Productid, FileInfo)};
 
 %% evidence 概要: 增加取证报告模版 描述:新增取证报告模版
 %% OperationId:put_reporttemp
@@ -169,189 +167,7 @@ do_request(post_reporttemp, #{<<"name">> := Name, <<"devType">> := DevType, <<"c
         Error -> Error
     end;
 
-%% DB 概要: 生成报告 描述:生成报告
-%% OperationId:generatereport
-%% 请求:POST /iotapi/generatereport
-do_request(post_generatereport, #{<<"id">> := TaskId}, #{<<"sessionToken">> := _SessionToken} = _Context, #{headers := #{<<"origin">> := Uri}} = _Req) ->
-    case dgiot_parse:get_object(<<"Device">>, TaskId) of
-        {ok, #{<<"name">> := TaskName, <<"basedata">> := Basedata, <<"profile">> := #{<<"step">> := Step, <<"reporttemp">> := Reporttemp} = Profile,
-            <<"product">> := #{<<"__type">> := <<"Pointer">>, <<"className">> := <<"Product">>, <<"objectId">> := _ProductId},
-            <<"parentId">> := #{<<"__type">> := <<"Pointer">>, <<"className">> := <<"Device">>, <<"objectId">> := _ParentId}
-        }} ->
-            DictId = dgiot_parse:get_dictid(TaskId, <<"word">>, <<"Device">>, <<"worddict">>),
-            case dgiot_parse:get_object(<<"Dict">>, DictId) of
-                {ok, #{<<"data">> := #{<<"params">> := Params}}} ->
-                    Worddatas =
-                        lists:foldl(fun(Param, Acc) ->
-                            Sources = maps:get(<<"sources">>, Param, <<"">>),
-                            Type = maps:get(<<"type">>, Param, <<"">>),
-                            Identifier = maps:get(<<"identifier">>, Param, <<"">>),
-                            Row = maps:get(<<"row">>, Param, 1),
-                            Column = maps:get(<<"column">>, Param, 1),
-                            Value = maps:get(Identifier, Basedata, <<"">>),
-                            case Sources of
-                                <<"amis">> ->
-                                    case Type of
-                                        <<"text">> ->
-                                            Acc ++ [#{
-                                                <<"type">> => <<"text">>,
-                                                <<"source">> => Sources,
-                                                <<"name">> => Identifier,
-                                                <<"value">> => Value}];
-                                        <<"image">> ->
-                                            Acc ++ [#{
-                                                <<"type">> => <<"image">>,
-                                                <<"source">> => Sources,
-                                                <<"name">> => Identifier,
-                                                <<"url">> => Value,
-                                                <<"width">> => 600,
-                                                <<"height">> => 360
-                                            }];
-                                        _ ->
-                                            Acc
-                                    end;
-                                _ ->
-                                    case Step =< 0 of
-                                        true ->
-                                            Acc;
-                                        _ ->
-                                            case Type of
-                                                <<"text">> ->
-                                                    Acc ++ [#{
-                                                        <<"type">> => <<"text">>,
-                                                        <<"source">> => Sources,
-                                                        <<"name">> => Identifier,
-                                                        <<"value">> => Value}];
-                                                <<"dynamicTable">> ->
-                                                    Avgdatas =
-                                                        case dgiot_parse:query_object(<<"Evidence">>, #{<<"limit">> => 1, <<"where">> => #{<<"reportId">> => TaskId, <<"original.type">> => <<"avgs">>, <<"original.taskid">> => TaskId}}) of
-                                                            {ok, #{<<"results">> := Results}} when length(Results) > 0 ->
-                                                                [#{<<"original">> := #{<<"avgs">> := Avgs}} | _] = Results,
-                                                                Avgs;
-                                                            _ ->
-                                                                []
-                                                        end,
-                                                    %% 采样参数
-                                                    Parameter = maps:get(<<"parameter">>, Param, <<"flow,power,head,rotate,pressure_in,pressure_out,conversion_flow,conversion_head,conversion_power,effect">>),
-                                                    {Tabledata, _} = dgiot_evidence:get_Tabledata(Parameter, Avgdatas),
-                                                    Acc ++ [#{
-                                                        <<"type">> => <<"dynamicTable">>,
-                                                        <<"source">> => Sources,
-                                                        <<"tablerow">> => Row,
-                                                        <<"tablecolumn">> => Column,
-                                                        <<"name">> => Identifier,
-                                                        <<"data">> => lists:reverse(Tabledata)
-                                                    }];
-                                                <<"image">> ->
-                                                    Repath =
-                                                        case dgiot_parse:query_object(<<"Evidence">>, #{<<"limit">> => 1, <<"where">> => #{<<"reportId">> => TaskId, <<"original.type">> => <<"avgs">>, <<"original.taskid">> => TaskId}}) of
-                                                            {ok, #{<<"results">> := Results}} when length(Results) > 0 ->
-                                                                [#{<<"original">> := #{<<"path">> := Path}} | _] = Results,
-                                                                Path;
-                                                            _ ->
-                                                                <<"">>
-                                                        end,
-                                                    Acc ++ [#{
-                                                        <<"type">> => <<"image">>,
-                                                        <<"source">> => Sources,
-                                                        <<"name">> => Identifier,
-                                                        <<"url">> => <<Uri/binary, Repath/binary>>,
-                                                        <<"width">> => 600,
-                                                        <<"height">> => 360
-                                                    }];
-                                                _ ->
-                                                    Acc
-                                            end
-                                    end
-                            end
-                                    end, [], Params),
-                    Body = #{
-                        <<"datas">> => Worddatas,
-                        <<"templateUrl">> => <<Uri/binary, Reporttemp/binary>>,
-                        <<"wordName">> => TaskName,
-                        <<"path">> => <<"dgiot_file/device/topo/", TaskId/binary>>
-                    },
-%%                    (post, {dgiot_utils:to_list(Url), [{"Content-Length", integer_to_list(Size)}], binary_to_list(ContentType), Body}, [], []),
-                    StrUri = dgiot_utils:to_list(Uri),
-                    Url = StrUri ++ "/WordController/replaceWord",
-                    case httpc:request(post, {Url, [], "application/json", jsx:encode(Body)}, [], []) of
-                        {ok, {{"HTTP/1.1", 200, "OK"}, _, Json}} ->
-                            case jsx:decode(dgiot_utils:to_binary(Json), [{labels, binary}, return_maps]) of
-                                #{<<"code">> := 200, <<"msg">> := <<"SUCCESS">>, <<"path">> := WordPath} = Data ->
-                                    Images = maps:get(<<"images">>, Data, []),
-                                    ViewRequests =
-                                        lists:foldl(fun(Image, Acc) ->
-                                            #{<<"heigh">> := Heigh, <<"url">> := ImageUrl, <<"width">> := Width} = Image,
-                                            case binary:split(filename:basename(ImageUrl), <<$.>>, [global, trim]) of
-                                                [Index, _] ->
-                                                    Acc ++ [dgiot_evidence:update_view(Index, ImageUrl, Heigh, Width, TaskId)];
-                                                _ ->
-                                                    Acc
-                                            end
-                                                    end, [], Images),
-                                    dgiot_parse:batch(ViewRequests),
-                                    dgiot_parse:update_object(<<"Device">>, TaskId, #{<<"profile">> => Profile#{<<"generatedreport">> => WordPath, <<"generatedtime">> => dgiot_datetime:now_secs()}}),
-                                    {ok, maps:without([<<"images">>], Data)};
-                                _Error1 ->
-                                    {ok, _Error1}
-                            end;
-                        _Error ->
-                            {ok, #{<<"code">> => 500, <<"msg">> => <<"生成报告失败"/utf8>>}}
-                    end;
-                _Oth ->
-                    {ok, #{<<"code">> => 500, <<"msg">> => <<"检测任务没有字典"/utf8>>}}
-            end;
-        _Oth1 ->
-            {ok, #{<<"code">> => 500, <<"msg">> => <<"找不到该检测任务"/utf8>>}}
-    end;
-
-%% evidence 概要: 调用python画性能曲线图
-%% OperationId:post_drawxnqx
-%% 请求:GET /iotapi/drawxnqx
-do_request(post_drawxnqx, #{<<"taskid">> := TaskId, <<"data">> := Data}, #{<<"sessionToken">> := SessionToken} = _Context, _Req) ->
-%%    dgiot_testing_equipment_flowSet
-%%    TaskId = ,
-    {NewEvidenceId, NewOriginal} =
-        case dgiot_parse:query_object(<<"Evidence">>, #{<<"limit">> => 1, <<"where">> => #{<<"reportId">> => TaskId, <<"original.type">> => <<"avgs">>, <<"original.taskid">> => TaskId}}) of
-            {ok, #{<<"results">> := Results}} when length(Results) > 0 ->
-                [#{<<"objectId">> := EvidenceId, <<"original">> := #{<<"avgs">> := Avgs} = Original} | _] = Results,
-                OldAvgs = Avgs ++ Data,
-                Path = python_drawxnqx(TaskId, arrtojsonlist(OldAvgs)),
-                NewOriginal1 = Original#{<<"path">> => Path, <<"avgs">> => OldAvgs},
-                dgiot_parse:update_object(<<"Evidence">>, EvidenceId, #{<<"original">> => NewOriginal1}),
-                {EvidenceId, NewOriginal1};
-            _ ->
-                case dgiot_auth:get_session(SessionToken) of
-                    #{<<"roles">> := Roles} ->
-                        Path = python_drawxnqx(TaskId, arrtojsonlist(Data)),
-                        [#{<<"name">> := Role} | _] = maps:values(Roles),
-                        TimeStamp = dgiot_datetime:now_ms(),
-                        Ukey = dgiot_utils:to_binary(dgiot_datetime:now_secs()),
-                        EvidenceId = dgiot_parse:get_evidenceId(Ukey, dgiot_utils:to_binary(TimeStamp)),
-                        Original = #{<<"taskid">> => TaskId, <<"avgs">> => Data, <<"type">> => <<"avgs">>, <<"path">> => Path},
-                        Evidence = #{
-                            <<"objectId">> => EvidenceId,
-                            <<"ACL">> => #{<<"role:", Role/binary>> => #{
-                                <<"read">> => true,
-                                <<"write">> => true}
-                            },
-                            <<"reportId">> => TaskId,
-                            <<"scene">> => Role,
-                            <<"timestamp">> => TimeStamp,
-                            <<"ukey">> => Ukey,
-                            <<"original">> => Original
-                        },
-                        dgiot_parse:create_object(<<"Evidence">>, Evidence),
-                        {EvidenceId, Original};
-                    _Other ->
-                        io:format("~s ~p _Other = ~p.~n", [?FILE, ?LINE, _Other]),
-                        Path = python_drawxnqx(TaskId, arrtojsonlist(Data)),
-                        {<<"">>, #{<<"avgs">> => Data, <<"path">> => Path}}
-                end
-        end,
-    {ok, #{<<"code">> => 200, <<"evidenceid">> => NewEvidenceId, <<"original">> => NewOriginal}};
-
-%% evidence 概要: 增加取证报告 描述:新增取证报告
+%% evidence 概要: 获取取证报告 描述:获取取证报告
 %% OperationId:get_report
 %% 请求:GET /iotapi/report
 do_request(get_report, #{<<"id">> := Id} = Body, #{<<"sessionToken">> := SessionToken} = _Context, _Req) ->
@@ -433,7 +249,7 @@ do_request(_OperationId, _Args, _Context, _Req) ->
 
 do_report(Config, DevType, Name, SessionToken, FullPath, Uri) ->
     CategoryId = maps:get(<<"category">>, Config, <<"d6ad425529">>),
-    ProductId = dgiot_parse:get_productid(CategoryId, DevType, Name),
+    ProductId = dgiot_parse_id:get_productid(CategoryId, DevType, Name),
     Producttempid = maps:get(<<"producttemplet">>, Config, <<"">>),
     case dgiot_httpc:fileUpload(Uri ++ "/WordController/fileUpload", dgiot_utils:to_list(FullPath), ProductId) of
         {ok, #{<<"code">> := 0, <<"msg">> := <<"SUCCESS">>, <<"path">> := WordPath, <<"images">> := Images}} ->
@@ -453,7 +269,7 @@ do_report(Config, DevType, Name, SessionToken, FullPath, Uri) ->
                 <<"producttemplet">> => #{<<"objectId">> => Producttempid, <<"__type">> => <<"Pointer">>, <<"className">> => <<"ProductTemplet">>},
                 <<"config">> => Config#{<<"reporttemp">> => WordPath},
                 <<"thing">> => #{},
-                <<"productSecret">> => license_loader:random(),
+                <<"productSecret">> => dgiot_utils:random(),
                 <<"dynamicReg">> => true}, SessionToken) of
                 {_, #{<<"objectId">> := ProductId}} ->
                     lists:foldl(fun(Image, Acc) ->
@@ -466,125 +282,11 @@ do_report(Config, DevType, Name, SessionToken, FullPath, Uri) ->
                         end
                                 end, [], Images);
                 _Oth1 ->
-                    io:format("_Oth1 ~p~n", [_Oth1]),
                     _Oth1
             end;
         _Oth ->
-            io:format("_Oth ~p~n", [_Oth]),
             _Oth
     end.
-
-get_paper(_ProductId, FileInfo) ->
-    Path = maps:get(<<"fullpath">>, FileInfo),
-    Fun = fun(Row) ->
-        Map = jiffy:encode(#{<<"1">> => dgiot_utils:to_binary(Row)}),
-        [V | _] = maps:values(jsx:decode(Map, [{labels, binary}, return_maps])),
-        V
-          end,
-    List = dgiot_utils:read(Path, Fun, []),
-%%    Title = lists:nth(1, List),
-%    DeviceId = dgiot_parse:get_deviceid(ProductId, dgiot_utils:to_md5(Title)),
-    Single = dgiot_utils:split_list(<<"一、单选题"/utf8>>, <<"二、多选题"/utf8>>, false, List, []),
-    Multiple = dgiot_utils:split_list(<<"二、多选题"/utf8>>, <<"三、判断题"/utf8>>, false, List, []),
-    Judge = dgiot_utils:split_list(<<"三、判断题"/utf8>>, <<"四、案例题"/utf8>>, false, List, []),
-    Cases = dgiot_utils:split_list(<<"四、案例题"/utf8>>, <<"四、案例题222"/utf8>>, false, List, []),
-    Cases1 = get_case(Cases, {<<"">>, []}, []),
-    {Single_question, _} = get_simple(Single, {[], #{}}),
-    {Multiple_question, _} = get_simple(Multiple, {[], #{}}),
-    {Judge_question, _} = get_simple(Judge, {[], #{}}),
-    Paper = Single_question ++ Multiple_question ++ Judge_question ++ Cases1,
-%    create_device(DeviceId, ProductId, Title, Paper),
-    #{
-        <<"paper">> => Paper
-    }.
-
-get_simple([], {Acc, Map}) ->
-    {Acc, Map};
-get_simple([Row | List], {Acc, Map}) ->
-    case Row of
-        <<"A."/utf8, _Result/binary>> ->
-            get_simple(List, {Acc, Map#{<<"A"/utf8>> => Row}});
-        <<"B."/utf8, _Result/binary>> ->
-            get_simple(List, {Acc, Map#{<<"B"/utf8>> => Row}});
-        <<"C."/utf8, _Result/binary>> ->
-            get_simple(List, {Acc, Map#{<<"C"/utf8>> => Row}});
-        <<"D."/utf8, _Result/binary>> ->
-            get_simple(List, {Acc, Map#{<<"D"/utf8>> => Row}});
-        <<"E."/utf8, _Result/binary>> ->
-            get_simple(List, {Acc, Map#{<<"E"/utf8>> => Row}});
-        <<"F."/utf8, _Result/binary>> ->
-            get_simple(List, {Acc, Map#{<<"F"/utf8>> => Row}});
-        <<"答案："/utf8, Result/binary>> ->
-            R1 = re:replace(Result, <<"\n">>, <<>>, [{return, binary}]),
-            R = re:replace(R1, <<" ">>, <<>>, [{return, binary}]),
-            get_simple(List, {Acc ++ [Map#{<<"Answer"/utf8>> => R}], #{}});
-        <<"答案:"/utf8, Result/binary>> ->
-            R1 = re:replace(Result, <<"\n">>, <<>>, [{return, binary}]),
-            R = re:replace(R1, <<" ">>, <<>>, [{return, binary}]),
-            get_simple(List, {Acc ++ [Map#{<<"Answer"/utf8>> => R}], #{}});
-        <<"\n"/utf8, _/binary>> ->
-            get_simple(List, {Acc, Map});
-        R when size(R) > 6 ->
-            get_simple(List, {Acc, Map#{<<"Question"/utf8>> => Row, <<"type">> => get_type(R)}});
-        _ ->
-            get_simple(List, {Acc, Map})
-    end.
-
-get_type(Question) ->
-%%    io:format("~ts", [unicode:characters_to_list(Question)]),
-    case re:run(Question, <<"判断"/utf8>>, [{capture, none}]) of
-        match ->
-            <<"判断题"/utf8>>;
-        _ ->
-            case re:run(Question, <<"多选"/utf8>>, [{capture, none}]) of
-                match ->
-                    <<"多选题"/utf8>>;
-                _ ->
-                    <<"单选题"/utf8>>
-            end
-    end.
-
-get_case([], {Title, Acc}, Result) ->
-    {Single_question, _} = get_simple(Acc, {[], #{}}),
-    Result ++ [#{<<"type">> => <<"材料题"/utf8>>, <<"Question"/utf8>> => Title, <<"questions"/utf8>> => Single_question}];
-get_case([Row | List], {Title, Acc}, Result) ->
-    case re:run(Row, <<"背景材料"/utf8>>, [{capture, none}]) of
-        match ->
-            case Title of
-                <<"">> ->
-                    get_case(List, {Row, Acc}, Result);
-                _ ->
-                    {Single_question, _} = get_simple(Acc, {[], #{}}),
-                    get_case(List, {Row, []}, Result ++ [#{<<"type">> => <<"材料题"/utf8>>, <<"Question"/utf8>> => Title, <<"questions"/utf8>> => Single_question}])
-            end;
-        _ ->
-            get_case(List, {Title, Acc ++ [Row]}, Result)
-    end.
-
-%%create_device(DeviceId, ProductId, Devaddr, Paper) ->
-%%    case dgiot_parse:get_object(<<"Product">>, ProductId) of
-%%        {ok, #{<<"ACL">> := Acl, <<"devType">> := DevType}} ->
-%%            case dgiot_parse:get_object(<<"Device">>, DeviceId) of
-%%                {ok, #{<<"devaddr">> := _GWAddr}} ->
-%%                    dgiot_parse:update_object(<<"Device">>, DeviceId, #{<<"basedata">> => #{<<"paper">> => Paper}, <<"status">> => <<"ONLINE">>});
-%%                _ ->
-%%                    dgiot_device:create_device(#{
-%%                        <<"devaddr">> => dgiot_utils:to_md5(Devaddr),
-%%                        <<"name">> => Devaddr,
-%%                        <<"isEnable">> => true,
-%%                        <<"product">> => ProductId,
-%%                        <<"ACL">> => Acl,
-%%                        <<"status">> => <<"ONLINE">>,
-%%                        <<"location">> => #{<<"__type">> => <<"GeoPoint">>, <<"longitude">> => 120.161324, <<"latitude">> => 30.262441},
-%%                        <<"brand">> => DevType,
-%%                        <<"devModel">> => DevType,
-%%                        <<"basedata">> =>  #{<<"paper">> => Paper}
-%%                    })
-%%            end;
-%%        Error2 ->
-%%            ?LOG(info, "Error2 ~p ", [Error2]),
-%%            pass
-%%    end.
 
 post_point(#{
     <<"reportid">> := ReportId,
@@ -888,122 +590,43 @@ get_report(Id, SessionToken) ->
         Error -> Error
     end.
 
-post_report(#{<<"name">> := Name, <<"product">> := ProductId, <<"parentId">> := ParentId, <<"profile">> := Profile}, SessionToken) ->
-    case dgiot_parse:get_object(<<"Product">>, ProductId, [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
-        {ok, #{<<"objectId">> := ProductId, <<"config">> := Config}} ->
-            WordPath = maps:get(<<"reporttemp">>, Config, <<"">>),
-            case dgiot_parse:query_object(<<"Device">>, #{<<"where">> => #{<<"name">> => Name, <<"product">> => ProductId}},
-                [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
-                {ok, #{<<"results">> := Results}} when length(Results) == 0 ->
-                    #{<<"roles">> := Roles} = dgiot_auth:get_session(SessionToken),
-                    [#{<<"name">> := Role} | _] = maps:values(Roles),
-                    <<DtuAddr:12/binary, _/binary>> = license_loader:random(),
-                    {ok, #{<<"objectId">> := DeviceId}} =
-                        dgiot_device:create_device(#{
-                            <<"devaddr">> => DtuAddr,
-                            <<"name">> => Name,
-                            <<"product">> => ProductId,
-                            <<"ACL">> => #{<<"role:", Role/binary>> => #{
-                                <<"read">> => true,
-                                <<"write">> => true}
-                            },
-                            <<"status">> => <<"ONLINE">>,
-                            <<"brand">> => <<"数蛙桌面采集网关"/utf8>>,
-                            <<"devModel">> => <<"SW_WIN_CAPTURE">>,
-                            <<"basedata">> => #{},
-                            <<"profile">> => Profile#{<<"reporttemp">> => WordPath},
-                            <<"parentId">> => #{
-                                <<"__type">> => <<"Pointer">>,
-                                <<"className">> => <<"Device">>,
-                                <<"objectId">> => ParentId
-                            }
-                        }),
-                    case dgiot_parse:query_object(<<"View">>, #{<<"order">> => <<"createdAt">>, <<"where">> => #{<<"key">> => ProductId, <<"class">> => <<"Product">>}}, [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
-                        {ok, #{<<"results">> := Views}} ->
-                            ViewRequests =
-                                lists:foldl(fun(View, Acc) ->
-                                    NewView = maps:without([<<"createdAt">>, <<"objectId">>, <<"updatedAt">>], View),
-                                    Type = maps:get(<<"type">>, View, <<"">>),
-                                    Title = maps:get(<<"title">>, View, <<"">>),
-                                    Viewid = dgiot_parse:get_viewid(DeviceId, Type, <<"Device">>, Title),
-                                    Acc ++ [#{
-                                        <<"method">> => <<"POST">>,
-                                        <<"path">> => <<"/classes/View">>,
-                                        <<"body">> => NewView#{
-                                            <<"objectId">> => Viewid,
-                                            <<"key">> => DeviceId,
-                                            <<"class">> => <<"Device">>}
-                                    }]
-                                            end, [], Views),
-                            dgiot_parse:batch(ViewRequests);
-                        _R1 ->
-                            ?LOG(info, "R1 ~p", [_R1])
-                    end,
-                    case dgiot_parse:query_object(<<"Dict">>, #{<<"order">> => <<"createdAt">>, <<"where">> => #{<<"key">> => ProductId, <<"class">> => <<"Product">>}}, [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
-                        {ok, #{<<"results">> := Dicts}} ->
-                            DictRequests =
-                                lists:foldl(fun(Dict, Acc) ->
-                                    NewDict = maps:without([<<"createdAt">>, <<"objectId">>, <<"updatedAt">>], Dict),
-                                    Type = maps:get(<<"type">>, Dict, <<"">>),
-                                    Title = maps:get(<<"title">>, Dict, <<"">>),
-                                    Dictid = dgiot_parse:get_dictid(DeviceId, Type, <<"Device">>, Title),
-                                    Acc ++ [#{
-                                        <<"method">> => <<"POST">>,
-                                        <<"path">> => <<"/classes/Dict">>,
-                                        <<"body">> => NewDict#{
-                                            <<"objectId">> => Dictid,
-                                            <<"key">> => DeviceId,
-                                            <<"class">> => <<"Device">>}
-                                    }]
-                                            end, [], Dicts),
-                            dgiot_parse:batch(DictRequests);
-                        _R3 ->
-                            ?LOG(info, "R1 ~p", [_R3])
-                    end,
-                    {ok, #{<<"result">> => <<"success">>}};
-                _R2 ->
-                    ?LOG(info, "R2 ~p", [_R2]),
-                    {error, <<"report exist">>}
-            end;
-        _R3 ->
-            ?LOG(info, "R3 ~p", [_R3]),
+post_report(#{<<"name">> := Name, <<"product">> := ProductId, <<"parentId">> := ParentId, <<"profile">> := Profile} = Args, SessionToken) ->
+    WordPath =
+        case dgiot_product:lookup_prod(ProductId) of
+            {ok, #{<<"productId">> := ProductId, <<"config">> := Config}} ->
+                maps:get(<<"reporttemp">>, Config, <<"">>);
+            _ ->
+                <<"">>
+        end,
+    <<DtuAddr:12/binary, _/binary>> = dgiot_utils:random(),
+    DevAddr = maps:get(<<"devaddr">>, Args, DtuAddr),
+    case dgiot_parse:query_object(<<"Device">>, #{<<"where">> => #{<<"name">> => Name, <<"devaddr">> => DevAddr, <<"product">> => ProductId}},
+        [{"X-Parse-Session-Token", SessionToken}], [{from, rest}]) of
+        {ok, #{<<"results">> := Results}} when length(Results) == 0 ->
+            #{<<"roles">> := Roles} = dgiot_auth:get_session(SessionToken),
+            [#{<<"name">> := Role} | _] = maps:values(Roles),
+            Basedata = maps:get(<<"basedata">>, Args, #{}),
+            dgiot_device:create_device(#{
+                <<"devaddr">> => DevAddr,
+                <<"name">> => Name,
+                <<"product">> => ProductId,
+                <<"ACL">> => #{<<"role:", Role/binary>> => #{
+                    <<"read">> => true,
+                    <<"write">> => true}
+                },
+                <<"status">> => <<"ONLINE">>,
+                <<"brand">> => <<"数蛙桌面采集网关"/utf8>>,
+                <<"devModel">> => <<"SW_WIN_CAPTURE">>,
+                <<"basedata">> => Basedata,
+                <<"profile">> => Profile#{<<"reporttemp">> => WordPath},
+                <<"parentId">> => #{
+                    <<"__type">> => <<"Pointer">>,
+                    <<"className">> => <<"Device">>,
+                    <<"objectId">> => ParentId
+                }
+            }),
+            {ok, #{<<"result">> => <<"success">>}};
+        _R2 ->
             {error, <<"report exist">>}
     end.
 
-
-
-arrtojsonlist(Data) when length(Data) > 0 ->
-    [Da | _] = Data,
-    Keys = maps:keys(Da),
-    lists:foldl(fun(Key, Acc) ->
-        Values =
-            lists:foldl(fun(X, Acc1) ->
-                Acc1 ++ [maps:get(Key, X, 0)]
-                        end, [], Data),
-        Acc#{Key => Values}
-                end, #{}, Keys);
-
-arrtojsonlist(_Data) ->
-    #{}.
-
-python_drawxnqx(TaskId, NewData) ->
-%%    io:format("NewData ~p~n",[NewData]),
-    Dgiot_testing_equipment_flowSet =
-        case dgiot_parse:get_object(<<"Device">>, TaskId) of
-            {ok, #{<<"basedata">> := BaseData}} ->
-                dgiot_utils:to_float(maps:get(<<"dgiot_testing_equipment_flowSet">>, BaseData, <<>>));
-            _ ->
-                0
-        end,
-    Path = code:priv_dir(dgiot_evidence),
-    Python3path = Path ++ "/python/drawxnqx.py ",
-    Filepath = application:get_env(dgiot_evidence, gofastdfs_path, <<"/data/dgiot/go_fastdfs/files/dgiot_file/pump_python/">>),
-    PythonBody = #{<<"name">> => <<TaskId/binary, ".png">>, <<"data">> => NewData, <<"path">> => Filepath, <<"dgiot_testing_equipment_flowSet">> => Dgiot_testing_equipment_flowSet},
-    Imagepath =
-        case catch base64:decode(os:cmd("python3 " ++ Python3path ++ dgiot_utils:to_list(base64:encode(jsx:encode(PythonBody))))) of
-            {'EXIT', _Error} ->
-                <<"">>;
-            NewPath ->
-                NewPath
-        end,
-    re:replace(dgiot_utils:to_list(Imagepath), "/data/dgiot/go_fastdfs/files", "", [global, {return, binary}, unicode]).

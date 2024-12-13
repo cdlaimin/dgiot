@@ -30,7 +30,7 @@
 %% 注册通道类型
 -channel_type(#{
     cType => ?TYPE,
-    type => ?PROTOCOL_CHL,
+    type => ?BRIDGE_CHL,
     title => #{
         zh => <<"TOPO组态通道"/utf8>>
     },
@@ -83,7 +83,7 @@
         order => 102,
         type => string,
         required => false,
-        default => <<"http://dgiot-1253666439.cos.ap-shanghai-fsi.myqcloud.com/shuwa_tech/zh/product/dgiot/channel/TOPO%E7%BB%84%E6%80%81%E9%80%9A%E9%81%93%E5%9B%BE%E6%A0%87.png">>,
+        default => <<"/dgiot_file/shuwa_tech/zh/product/dgiot/channel/topo_channel.png">>,
         title => #{
             en => <<"channel ICO">>,
             zh => <<"通道ICO"/utf8>>
@@ -107,14 +107,13 @@ init(?TYPE, ChannelId, #{<<"product">> := Products, <<"BRIDGEURL">> := Bridgeurl
         id = ChannelId,
         env = NewEnv#{productids => get_prodcutids(Products)}
     },
+    dgiot_parse_hook:subscribe(<<"View/*">>, put, ChannelId),
     dgiot_data:insert(topourl, <<Bridgeurl/binary, "/iotapi/topo">>),
-    dgiot_topo:get_Product(),
+    dgiot_product_knova:get_Product_konva(),
     {ok, State}.
 
 %% 初始化池子
-handle_init(#state{env = #{productids := ProductIds}} = State) ->
-    [dgiot_mqtt:subscribe(<<"topo/", ProductId/binary, "/#">>) || ProductId <- ProductIds],
-    dgiot_parse:subscribe(<<"Product">>, post),
+handle_init(State) ->
     {ok, State}.
 
 %% 通道消息处理,注意：进程池调用
@@ -122,98 +121,16 @@ handle_event(EventId, Event, _State) ->
     ?LOG(info, "channel ~p, ~p", [EventId, Event]),
     ok.
 
-handle_message({sync_parse, Args}, State) ->
-%%    io:format("Args ~p~n", [jsx:decode(Args, [{labels, binary}, return_maps])]),
-    case jsx:decode(Args, [{labels, binary}, return_maps]) of
-        #{<<"producttemplet">> := #{<<"className">> := <<"ProductTemplet">>, <<"objectId">> := ProducttempletId, <<"__type">> := <<"Pointer">>}, <<"objectId">> := ObjectId} ->
-            case dgiot_parse:query_object(<<"Dict">>, #{<<"where">> => #{<<"key">> => ProducttempletId, <<"class">> => <<"ProductTemplet">>}}) of
-                {ok, #{<<"results">> := Dicts}} ->
-                    DictRequests =
-                        lists:foldl(fun(Dict, Acc) ->
-                            NewDict = maps:without([<<"createdAt">>, <<"objectId">>, <<"updatedAt">>], Dict),
-                            Type = maps:get(<<"type">>, Dict, <<"">>),
-                            Title = maps:get(<<"title">>, Dict, <<"">>),
-                            DictId = dgiot_parse:get_dictid(ObjectId, Type, <<"Product">>, Title),
-                            Acc ++ [#{
-                                <<"method">> => <<"POST">>,
-                                <<"path">> => <<"/classes/Dict">>,
-                                <<"body">> => NewDict#{
-                                    <<"objectId">> => DictId,
-                                    <<"key">> => ObjectId,
-                                    <<"class">> => <<"Product">>}
-                            }]
-                                    end, [], Dicts),
-                    dgiot_parse:batch(DictRequests);
-                _ ->
-                    pass
-            end,
-            case dgiot_parse:query_object(<<"View">>, #{<<"where">> => #{<<"key">> => ProducttempletId, <<"class">> => <<"ProductTemplet">>}}) of
-                {ok, #{<<"results">> := Views}} when length(Views) > 0 ->
-                    ViewRequests =
-                        lists:foldl(fun(View, Acc) ->
-                            NewDict = maps:without([<<"createdAt">>, <<"objectId">>, <<"updatedAt">>], View),
-                            Type = maps:get(<<"type">>, View, <<"">>),
-                            Title = maps:get(<<"title">>, View, <<"">>),
-                            ViewId = dgiot_parse:get_viewid(ObjectId, Type, <<"Product">>, Title),
-                            Acc ++ [#{
-                                <<"method">> => <<"POST">>,
-                                <<"path">> => <<"/classes/View">>,
-                                <<"body">> => NewDict#{
-                                    <<"objectId">> => ViewId,
-                                    <<"key">> => ObjectId,
-                                    <<"class">> => <<"Product">>}
-                            }]
-                                    end, [], Views),
-                    dgiot_parse:batch(ViewRequests);
-                _ ->
-                    NewConfig = #{
-                        <<"konva">> => #{
-                            <<"Stage">> => #{
-                                <<"attrs">> => #{
-                                    <<"width">> => <<"1200">>,
-                                    <<"height">> => <<"700">>},
-                                <<"className">> => <<"Stage">>,
-                                <<"children">> => [#{
-                                    <<"attrs">> => #{
-                                        <<"id">> => <<"Layer_Thing">>},
-                                    <<"className">> => <<"Layer">>,
-                                    <<"children">> => [#{
-                                        <<"attrs">> => #{
-                                            <<"id">> => <<"bg">>,
-                                            <<"type">> => <<"bg-image">>,
-                                            <<"width">> => <<"1200">>,
-                                            <<"height">> => <<"700">>,
-                                            <<"src">> => <<"//img7.ddove.com/upload/20181127/134600237598.jpg?timestamp=1635422987361">>},
-                                        <<"className">> => <<"Image">>}]}]}}},
-                    dgiot_parse:create_object(<<"View">>, #{
-                        <<"title">> => ObjectId,
-                        <<"key">> => ObjectId,
-                        <<"type">> => <<"topo">>,
-                        <<"class">> => <<"Product">>,
-                        <<"data">> => NewConfig
-                    })
-            end;
-        _ ->
-            pass
-    end,
+handle_message({sync_parse, Pid, 'before', put, _Token, <<"View">>, #{<<"id">> := _ObjectId, <<"data">> := #{<<"konva">> := Konva} = Data} = QueryData}, State) ->
+    NewKonva =  dgiot_topo:get_konva(Konva),
+    dgiot_parse_hook:publish(Pid, QueryData#{<<"data">> => Data#{<<"konva">> => NewKonva}}),
     {ok, State};
 
-handle_message({deliver, _Topic, Msg}, #state{id = ChannelId} = State) ->
-    Payload = dgiot_mqtt:get_payload(Msg),
-    dgiot_bridge:send_log(ChannelId, "Topic ~p DTU revice from  ~s", [dgiot_mqtt:get_topic(Msg), Payload]),
-    case binary:split(dgiot_mqtt:get_topic(Msg), <<$/>>, [global, trim]) of
-%%接收task汇聚过来的整个dtu物模型采集的数据 发送组态
-        [<<"topo">>, ProductId, DtuAddr, <<"post">>] ->
-            Data = jsx:decode(Payload, [{labels, binary}, return_maps]),
-            DeviceId = dgiot_parse:get_deviceid(ProductId, DtuAddr),
-            Thingdata = maps:get(<<"thingdata">>, Data, #{}),
-            dgiot_topo:send_topo(ProductId, DeviceId, Thingdata),
-%%            发送实时数据
-            dgiot_topo:send_realtimedata(ProductId, DeviceId, Thingdata);
-        Other ->
-            ?LOG(info, "Other ~p", [Other]),
-            pass
-    end,
+handle_message({topo_thing, ProductId, DeviceId, Data}, State) ->
+%%     发送实时数据
+    dgiot_topo:send_realtime_card(ProductId, DeviceId, Data),
+%%     发送组态数据
+%%    dgiot_topo:send_konva(ProductId, DeviceId, Data),
     {ok, State};
 
 handle_message(Message, State) ->
@@ -236,3 +153,5 @@ get_newenv(Args) ->
         <<"Size">>,
         <<"applicationtText">>,
         <<"product">>], Args).
+
+

@@ -80,7 +80,7 @@
         order => 102,
         type => string,
         required => false,
-        default => <<"http://dgiot-1253666439.cos.ap-shanghai-fsi.myqcloud.com/shuwa_tech/zh/product/dgiot/channel/OPC_ICO.png">>,
+        default => <<"/dgiot_file/shuwa_tech/zh/product/dgiot/channel/opc_channel.png">>,
         title => #{
             en => <<"channel ICO">>,
             zh => <<"通道ICO"/utf8>>
@@ -116,7 +116,6 @@ handle_init(State) ->
     Topic_SCAN = binary:bin_to_list(Topic) ++ "_scan",
     dgiot_mqtt:subscribe( erlang:list_to_binary(Topic_ACK)),
     dgiot_mqtt:subscribe( erlang:list_to_binary(Topic_SCAN)),
-    dgiot_parse:subscribe(<<"Device">>, post),
     erlang:send_after(1000 * 5, self(), scan_opc),
     erlang:send_after(1000*60*10,self(),offline_jud),
     {ok, State}.
@@ -135,10 +134,6 @@ handle_message(offline_jud, #state{env = Env} = State) ->
     [offline_modify(DeviceID) ||{DeviceID,_} <- Deviceinfo_list],
     {ok, State};
 
-handle_message({sync_parse, Args}, State) ->
-    ?LOG(info,"sync_parse ~p", [Args]),
-    {ok, State};
-
 handle_message(scan_opc, #state{env = Env} = State) ->
     dgiot_opc:scan_opc(Env),
 %%    #{<<"Topic">> := Topic} = Env,
@@ -151,7 +146,7 @@ handle_message(scan_opc, #state{env = Env} = State) ->
 handle_message(read_opc, #state{id = ChannelId, step = read_cycle ,env = #{<<"OPCSEVER">> := OpcServer,<<"Topic">> := Topic, <<"productid">> := ProductId,<<"deviceinfo_list">> := Deviceinfo_list}} = State) ->
     {ok,#{<<"name">> :=ProductName}} = dgiot_parse:get_object(<<"Product">>,ProductId),
     DeviceName_list = [get_DevAddr(X)|| X <- Deviceinfo_list],
-    case dgiot_device:lookup_prod(ProductId) of
+    case dgiot_product:lookup_prod(ProductId) of
         {ok, #{<<"thing">> := #{<<"properties">> := Properties}}} ->
             Item2 = [maps:get(<<"identifier">>, H) || H <- Properties],
             Identifier_item = [binary:bin_to_list(H) || H <- Item2],
@@ -185,7 +180,7 @@ handle_message({deliver, _Topic, Msg}, #state{ step = pre_read, env = Env} = Sta
         false ->
             pass;
         true ->
-            case jsx:decode(Payload, [return_maps]) of
+            case dgiot_json:decode(Payload, [return_maps]) of
                 #{<<"status">> := 0} = Map0 ->
                     [Map1 | _] = maps:values(maps:without([<<"status">>], Map0)),
                     case maps:find(<<"status">>,Map1) of
@@ -212,8 +207,7 @@ handle_message({deliver, _Topic, Msg}, #state{ step = pre_read, env = Env} = Sta
                     Final_Properties = dgiot_opc:create_final_Properties(Need_update_list),
                     Topo_para=lists:zip(Need_update_list,dgiot_opc:create_x_y(erlang:length(Need_update_list))),
                     New_config = dgiot_opc:create_config(dgiot_opc:change_config(Topo_para)),
-                    dgiot_product:load(ProductId),
-                    case dgiot_device:lookup_prod(ProductId) of
+                    case dgiot_product:lookup_prod(ProductId) of
                         {ok, #{<<"thing">> := #{<<"properties">> := Properties}}} ->
                             case erlang:length(Properties)  of
                                 0 ->
@@ -232,7 +226,7 @@ handle_message({deliver, _Topic, Msg}, #state{ step = pre_read, env = Env} = Sta
 handle_message({deliver, _Topic, Msg}, #state{id = ChannelId, step = read, env = Env} = State) ->
     Payload = dgiot_mqtt:get_payload(Msg),
     #{<<"productid">> := ProductId, <<"deviceinfo_list">> := Deviceinfo_list} = Env,  %Deviceinfo_list = [{DeviceId1,Devaddr1},{DeviceId2,Devaddr2}...]
-    dgiot_bridge:send_log(ChannelId, "from opc read: ~p  ", [jsx:decode(Payload, [return_maps])]),
+    dgiot_bridge:send_log(ChannelId, "from opc read: ~p  ", [dgiot_json:decode(Payload, [return_maps])]),
     case jsx:is_json(Payload) of
         false ->
             pass;

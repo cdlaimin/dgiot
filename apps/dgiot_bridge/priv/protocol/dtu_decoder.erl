@@ -54,7 +54,7 @@ handle_info({message, #{<<"cmd">> := <<"LOGIN">>, <<"addr">> := Addr}}, #{<<"pro
     Auto andalso erlang:send_after(5000, self(), check),
     {ok, State#{<<"addr">> => Addr}};
 
-handle_info({message, #{<<"cmd">> := <<"HEART">>}}, #{ <<"addr">> := Addr, <<"productId">> := ProductId, <<"channelId">> := ChannelId, <<"auto">>:= Auto} = State) ->
+handle_info({message, #{<<"cmd">> := <<"HEART">>}}, #{ <<"addr">> := Addr, <<"productId">> := ProductId, <<"channelId">> := ChannelId} = State) ->
     dgiot_bridge:send_log(ChannelId, ProductId, "DTU ~p HEART", [Addr]),
     {ok, State};
 
@@ -62,10 +62,10 @@ handle_info({message, #{<<"subAddr">> := SubAddr} = Frame}, #{ <<"addr">> := Add
     Devices = maps:get(<<"devices">>, State, #{}),
     case maps:get(SubAddr, Devices, no) of
         no ->
-            dgiot_bridge:send_log(ChannelId, ProductId, "DTU:~p online Recv ~s", [Addr, jsx:encode(Frame)]),
+            dgiot_bridge:send_log(ChannelId, ProductId, "DTU:~p online Recv ~s", [Addr, dgiot_json:encode(Frame)]),
             {ok, State#{<<"devices">> => Devices#{SubAddr => true}}};
         true ->
-            dgiot_bridge:send_log(ChannelId, ProductId, "DTU:~p Recv ~s", [Addr, jsx:encode(Frame)]),
+            dgiot_bridge:send_log(ChannelId, ProductId, "DTU:~p Recv ~s", [Addr, dgiot_json:encode(Frame)]),
             {ok, State}
     end;
 

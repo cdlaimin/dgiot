@@ -28,7 +28,7 @@
     spec/0, spec/1,
     delete/2, delete/3,
     status/1,
-    do_event/3, do_event/4,  do_event/5,
+    do_event/3, do_event/4, do_event/5, send_after/3,
     do_message/2, do_message/3, do_message/4,
     call/3, call/4, call2/3, call2/4,
     start_link/1]).
@@ -58,7 +58,8 @@ add2(ServerName, ChannelType, ChannelId, Mod, ChannelArgs) ->
     dgiot_channelx_sup:add(channelx_mgr, ServerName, ChannelType, ChannelId, Mod, ChannelArgs).
 
 add(ChannelType, ChannelId, Mod, ChannelArgs) ->
-    add(channelx_mgr, ChannelType, ChannelId, Mod, ChannelArgs).
+    CType1 = list_to_binary(string:uppercase(dgiot_utils:to_list(ChannelType))),
+    add(channelx_mgr, CType1, ChannelId, Mod, ChannelArgs).
 
 add(Sup, ChannelType, ChannelId, Mod, ChannelArgs) ->
     dgiot_channelx_sup:add(Sup, ChannelType, ChannelId, Mod, ChannelArgs).
@@ -102,6 +103,21 @@ do_event(ChannelType, ChannelId, EventId, Event, Timeout) ->
         end,
 %%    ?LOG(error, "EventId ~p", [EventId]),
     poolboy:transaction(Pool, Fun, Timeout).
+
+
+send_after(Time, ChannelId, Message) ->
+    case dgiot_data:get({channeltype, ChannelId}) of
+        not_find ->
+            not_find;
+        ChannelType ->
+            Pool = ?CHANNEL(ChannelType, ChannelId),
+            Fun =
+                fun(Worker) ->
+                    erlang:send_after(Time, Worker, {message, Pool, Message}),
+                    ok
+                end,
+            poolboy:transaction(Pool, Fun, 5000)
+    end.
 
 do_message(ChannelId, Message) ->
     case dgiot_data:get({channeltype, ChannelId}) of
@@ -171,17 +187,23 @@ start_link([Mod, State]) ->
 %%%===================================================================
 
 init([Mod, ChildState]) ->
-    case erlang:function_exported(Mod, handle_init, 1) of
+    case erlang:module_loaded(Mod) of
         true ->
-            case Mod:handle_init(ChildState) of
-                {ok, NewChildState} ->
-                    {ok, #state{childState = NewChildState, mod = Mod}};
-                {stop, Reason} ->
-                    {stop, Reason}
+            case erlang:function_exported(Mod, handle_init, 1) of
+                true ->
+                    case Mod:handle_init(ChildState) of
+                        {ok, NewChildState} ->
+                            {ok, #state{childState = NewChildState, mod = Mod}};
+                        {stop, Reason} ->
+                            {stop, Reason}
+                    end;
+                false ->
+                    {ok, #state{childState = ChildState, mod = Mod}}
             end;
         false ->
-            {ok, #state{childState = ChildState, mod = Mod}}
+            {stop, <<"module not exist">>}
     end.
+
 
 handle_call(Request, _From, State) ->
     case catch handle_message(Request, State) of
@@ -235,6 +257,8 @@ handle_info(Info, State) ->
             {stop, Reason, State};
         {Err, Reason} when Err == 'EXIT'; Err == error ->
             ?LOG(error, "do_message, ~p,~p", [Info, Reason]),
+            {noreply, State};
+        _ ->
             {noreply, State}
     end.
 

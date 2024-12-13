@@ -95,20 +95,22 @@ get_trace(_) ->
 check_trace(From, Topic, Payload, Module, Line) ->
     Msg = #{<<"msg">> => Payload, <<"topic">> => Topic, <<"time">> => dgiot_datetime:now_secs(),
         <<"pid">> => dgiot_utils:to_binary(self()), <<"peername">> => From, <<"mfa">> => Module, <<"line">> => Line},
-    check_trace(From, Topic, jsx:encode(Msg)).
+    check_trace(From, Topic, dgiot_json:encode(Msg)).
 
 check_trace(From, Topic, Payload) ->
     case get_trace({clientid, From}) of
         true ->
             BinClientId = dgiot_utils:to_binary(From),
-            dgiot_mqtt:publish(From, <<"logger_trace/trace/", BinClientId/binary, "/", Topic/binary>>, Payload);
+            dgiot_mqtt:publish(From, <<"$dg/user/trace/", BinClientId/binary, "/", Topic/binary>>, Payload);
         false ->
-            case get_trace({topic, Topic}) of
-                true ->
-                    dgiot_mqtt:publish(self(), <<"logger_trace/trace/", Topic/binary>>, Payload);
-                false ->
-                    false
-            end
+%%            todo Topic安全校验不好做
+%%            case get_trace({topic, Topic}) of
+%%                true ->
+%%                    dgiot_mqtt:publish(self(), <<"$dg/trace/", Topic/binary>>, Payload);
+%%                false ->
+%%                    false
+%%            end
+            ok
     end.
 
 %%--------------------------------------------------------------------
